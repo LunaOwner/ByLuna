@@ -1,1 +1,4614 @@
-loadstring(game:HttpGet("https://pastefy.app/pdEYC0y2/raw"))()
+--[[
+    ╔════════════════════════════════════════════════════════════╗
+    ║  FPS BOOSTER SUPREMO — Ultimate Roblox Performance System  ║
+    ║  LUNA COMMUNITY                                            ║
+    ╠════════════════════════════════════════════════════════════╣
+    ║  Tipo:  LocalScript (um único arquivo, PC + Mobile)        ║
+    ║  Local: StarterPlayer > StarterPlayerScripts               ║
+    ║  Tudo é local (cliente) e restaurável.                     ║
+    ║  loadstring / HttpGet: usados SOMENTE na aba Others        ║
+    ║  Scripts, e apenas quando você clica em "Execute Script".  ║
+    ╚════════════════════════════════════════════════════════════╝
+]]
+
+-- v1.2.0: abas "Others Scripts" e "Credits", versão mobile (botão RUN na tela, janela
+-- adaptável), bolinha de minimizar com imagem e 20 temas no Custom UI.
+-- O Auto Candy usa fireproximityprompt / Drawing somente se o ambiente oferecer essas funções.
+
+-- ════════════════════════════════════════════════════════════════
+-- SERVIÇOS
+-- ════════════════════════════════════════════════════════════════
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local Stats = game:GetService("Stats")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ════════════════════════════════════════════════════════════════
+-- CONSTANTES
+-- ════════════════════════════════════════════════════════════════
+local GUI_NAME = "FPSBoosterSupremo"
+local VERSION = "v1.2.0"
+local SCAN_BUDGET = 0.003      -- segundos por frame gastos em varreduras
+local SAMPLE_INTERVAL = 0.5    -- intervalo de amostragem do monitor
+local HISTORY_SIZE = 60        -- amostras no gráfico (60 x 0.5s = 30s)
+
+local IS_TOUCH = UserInputService.TouchEnabled          -- mobile / tablet
+local BUBBLE_SIZE = IS_TOUCH and 56 or 46               -- tamanho da bolinha de minimizar
+local BUBBLE_ASSET = "rbxassetid://107935895427211"     -- imagem da bolinha
+local DISCORD_LINK = "https://discord.gg/qa8ZxwT9j"
+
+local band, bor, bnot = bit32.band, bit32.bor, bit32.bnot
+
+local C = {
+    bg = Color3.fromRGB(10, 10, 16),
+    panel = Color3.fromRGB(14, 14, 22),
+    row = Color3.fromRGB(22, 22, 34),
+    rowHover = Color3.fromRGB(32, 32, 52),
+    stroke = Color3.fromRGB(55, 55, 85),
+    text = Color3.fromRGB(240, 240, 255),
+    sub = Color3.fromRGB(150, 150, 185),
+    blue = Color3.fromRGB(0, 140, 255),
+    purple = Color3.fromRGB(150, 70, 255),
+    cyan = Color3.fromRGB(0, 240, 255),
+    pink = Color3.fromRGB(255, 50, 190),
+    red = Color3.fromRGB(255, 60, 70),
+    green = Color3.fromRGB(50, 255, 120),
+    yellow = Color3.fromRGB(255, 200, 60),
+}
+
+local RGB_SEQUENCE = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, C.cyan),
+    ColorSequenceKeypoint.new(0.25, C.blue),
+    ColorSequenceKeypoint.new(0.5, C.purple),
+    ColorSequenceKeypoint.new(0.75, C.pink),
+    ColorSequenceKeypoint.new(1, C.cyan),
+})
+
+-- Bits dos efeitos (cada efeito de otimização possui um bit)
+local B = {
+    Trees = 1, Mountains = 2, Grass = 4, Decorations = 8, Textures = 16,
+    Particles = 32, Shadows = 64, LowGraphics = 128, VisualFX = 256, Meshes = 512,
+    Smart = 1024, -- bit exclusivo do Smart Graphics (nível de qualidade)
+}
+local EFFECT_ORDER = {
+    "Trees", "Mountains", "Grass", "Decorations", "Textures",
+    "Particles", "Shadows", "LowGraphics", "VisualFX", "Meshes",
+}
+local ALL_EFFECTS_MASK = 1023
+local ALL_BITS_MASK = 2047
+local NAME_BITS = 15 -- Trees | Mountains | Grass | Decorations
+
+local DEFAULT_CONFIG = {showFps = true, showPing = true, rgb = true, position = 1}
+local POSITION_NAMES = {"Center", "Top Left", "Top Right", "Bottom Left", "Bottom Right"}
+
+-- Scripts externos da aba "Others Scripts" (carregados somente ao clicar em EXECUTE SCRIPT).
+-- Para adicionar outro, basta incluir uma linha nesta tabela.
+local SCRIPT_LIST = {
+    {id = "kamui", name = "Kamui TSB", game = "The Strongest Battlegrounds",
+        url = "https://api.jnkie.com/api/v1/luascripts/public/bd4d4dab8e75f0888883bcbd48246c23037639f756120d2fc14946d4169140c2/download"},
+    {id = "avatarcopy", name = "Avatar Copy", game = "Universal",
+        url = "https://api.lyraez.lol/loader"},
+    {id = "homey", name = "Homey MM2", game = "Murder Mystery 2",
+        url = "https://api.honeylua.com/loader"},
+    {id = "kittyware", name = "KittyWare TSB", game = "The Strongest Battlegrounds",
+        url = "https://raw.githubusercontent.com/0mam0ri/KittyWare/refs/heads/main/obf.lua"},
+    {id = "jjsbf", name = "JJS Black Flash", game = "Jujutsu Shenanigans",
+        url = "https://raw.githubusercontent.com/houseguynew/jjs-scripts/refs/heads/main/auto%20bf%20chain%20v1.txt"},
+    {id = "gamepass", name = "Gamepass TSB Paid", game = "The Strongest Battlegrounds",
+        url = "https://pastefy.app/pdEYC0y2/raw"},
+    {id = "pingspoof", name = "Ping Spoofer TSB", game = "The Strongest Battlegrounds",
+        url = "https://pastefy.app/fYbGrH61/raw"},
+}
+
+-- ════════════════════════════════════════════════════════════════
+-- ESTADO GLOBAL
+-- ════════════════════════════════════════════════════════════════
+local alive = true
+local connections = {}
+local config = {}
+for key, value in pairs(DEFAULT_CONFIG) do config[key] = value end
+
+local state = {}      -- estado ON/OFF de cada feature
+local ui = {}         -- referências de interface
+local monUI = {}      -- referências da aba Monitor
+local toggleVisuals = {}
+local pageOrder = {}
+local rgbGradients = {}
+local hudReady = false
+local currentSequence = RGB_SEQUENCE -- sequência de cor usada pelos gradientes RGB (Custom UI altera)
+
+local monitor = {
+    frames = 0, elapsed = 0, worstDt = 0, samples = 0,
+    fps = 0, frameMs = 0, worstMs = 0, ping = 0, memory = 0,
+    maxFps = nil, minFps = nil, history = {},
+}
+
+-- Declarações antecipadas (atribuídas mais abaixo)
+local refreshToggle, updateStatus, notify, updateHUD, updateMonitorUI, updateGraph
+local lunaDisableAll, customTick, refreshPositionText, buildLunaPage, buildCustomPage
+
+local function track(connection)
+    connections[#connections + 1] = connection
+    return connection
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- IDIOMA (PT-BR / EN-US)
+-- Os textos da interface são escritos em inglês (chave). Em português,
+-- cada chave é trocada pela tradução abaixo. Textos dinâmicos usam tr().
+-- ════════════════════════════════════════════════════════════════
+local lang = "pt"
+local textOrig = setmetatable({}, {__mode = "k"})
+local skipLocalize = setmetatable({}, {__mode = "k"})
+local dynTexts = setmetatable({}, {__mode = "k"})
+local langHooks = {}
+
+local PT = {
+    -- Tela de confirmação
+    ["Do you want to run FPS Booster Supremo?"] = "Deseja executar o FPS Booster Supremo?",
+    ["YES"] = "SIM",
+    ["NO"] = "NÃO",
+    ["Perfect! Your FPS Booster will start in 5 seconds."] = "Perfeito! Seu FPS Booster será iniciado em 5 segundos.",
+    ["Ok! Closing GUI in 3 seconds."] = "Ok! Fechando GUI em 3 segundos.",
+    -- Janela
+    ["Ultimate Roblox Performance System"] = "Sistema Definitivo de Desempenho para Roblox",
+    ["Advanced"] = "Avançado",
+    ["Settings"] = "Ajustes",
+    -- FPS Booster
+    ["OPTIMIZATIONS"] = "OTIMIZAÇÕES",
+    ["Potato Mode"] = "Modo Batata",
+    ["Removes textures, particles, shadows and post effects"] = "Remove texturas, partículas, sombras e pós-efeitos",
+    ["Remove Trees"] = "Remover Árvores",
+    ["Hides trees locally (restorable)"] = "Oculta árvores localmente (restaurável)",
+    ["Remove Mountains"] = "Remover Montanhas",
+    ["Simplifies mountain materials, shadows and meshes"] = "Simplifica materiais, sombras e malhas das montanhas",
+    ["Remove Grass"] = "Remover Grama",
+    ["Hides grass and disables terrain decoration"] = "Oculta a grama e desativa a decoração do terreno",
+    ["Remove Decorations"] = "Remover Decorações",
+    ["Hides decorative objects"] = "Oculta objetos decorativos",
+    ["Remove Textures"] = "Remover Texturas",
+    ["Strips decals, textures and part materials"] = "Remove decalques, texturas e materiais das peças",
+    ["Remove Particles"] = "Remover Partículas",
+    ["Disables particles, trails, beams, fire and smoke"] = "Desativa partículas, rastros, feixes, fogo e fumaça",
+    ["Remove Shadows"] = "Remover Sombras",
+    ["Disables global, part and light shadows"] = "Desativa sombras globais, de peças e de luzes",
+    ["Low Graphics"] = "Gráficos Baixos",
+    ["Lowers quality level, water and mesh detail"] = "Reduz o nível de qualidade, água e detalhe das malhas",
+    ["Ultra Performance"] = "Desempenho Ultra",
+    ["Applies every safe optimization at once"] = "Aplica todas as otimizações seguras de uma vez",
+    -- Monitor
+    ["REAL-TIME METRICS"] = "MÉTRICAS EM TEMPO REAL",
+    ["RENDER / FRAME TIME"] = "TEMPO DE RENDER / QUADRO",
+    ["CLIENT MEMORY"] = "MEMÓRIA DO CLIENTE",
+    ["PERFORMANCE"] = "DESEMPENHO",
+    ["SYSTEM STATE"] = "ESTADO DO SISTEMA",
+    ["FPS HISTORY (LAST 30 SECONDS)"] = "HISTÓRICO DE FPS (ÚLTIMOS 30 SEGUNDOS)",
+    ["RECORDS"] = "RECORDES",
+    ["HIGHEST FPS"] = "MAIOR FPS",
+    ["LOWEST FPS"] = "MENOR FPS",
+    ["EXCELLENT"] = "EXCELENTE",
+    ["GOOD"] = "BOM",
+    ["AVERAGE"] = "MÉDIO",
+    ["CRITICAL"] = "CRÍTICO",
+    -- Advanced
+    ["AUTOMATION"] = "AUTOMAÇÃO",
+    ["Automatic Optimization"] = "Otimização Automática",
+    ["Escalates optimizations in stages when FPS stays low"] = "Aumenta as otimizações em etapas quando o FPS fica baixo",
+    ["Smart Graphics"] = "Gráficos Inteligentes",
+    ["Adapts the graphics quality level to your FPS"] = "Adapta o nível de qualidade gráfica ao seu FPS",
+    ["Dynamic Performance"] = "Desempenho Dinâmico",
+    ["Engages light effects cuts only while FPS is low"] = "Corta efeitos leves apenas enquanto o FPS está baixo",
+    ["TWEAKS"] = "AJUSTES",
+    ["Reduce Visual Effects"] = "Reduzir Efeitos Visuais",
+    ["Disables bloom, blur, sun rays, DoF and particles"] = "Desativa bloom, desfoque, raios de sol, DoF e partículas",
+    ["Memory Optimization"] = "Otimização de Memória",
+    ["Lowers mesh detail and flushes internal caches"] = "Reduz o detalhe das malhas e limpa caches internos",
+    ["LIVE INFO"] = "INFORMAÇÕES AO VIVO",
+    ["ACTIONS"] = "AÇÕES",
+    ["RESTORE DEFAULT GRAPHICS"] = "RESTAURAR GRÁFICOS PADRÃO",
+    ["ACTIVE"] = "ATIVO",
+    ["standby"] = "em espera",
+    -- Settings
+    ["DISPLAY"] = "EXIBIÇÃO",
+    ["Show FPS"] = "Mostrar FPS",
+    ["Floating FPS counter on screen"] = "Contador de FPS flutuante na tela",
+    ["Show Ping"] = "Mostrar Ping",
+    ["Floating ping counter on screen"] = "Contador de ping flutuante na tela",
+    ["RGB Animations"] = "Animações RGB",
+    ["Animated neon borders and gradients"] = "Bordas neon e gradientes animados",
+    ["RESTORE DEFAULT SETTINGS"] = "RESTAURAR CONFIGURAÇÕES PADRÃO",
+    ["EMERGENCY"] = "EMERGÊNCIA",
+    ["EMERGENCY — UNDO ALL CHANGES"] = "EMERGÊNCIA — DESFAZER TODAS AS ALTERAÇÕES",
+    -- Padrões dinâmicos
+    ["Active optimizations: %d / %d     State: %s"] = "Otimizações ativas: %d / %d     Estado: %s",
+    ["Applying..."] = "Aplicando...",
+    ["Optimized"] = "Otimizado",
+    ["Idle"] = "Ocioso",
+    ["Auto stage: %d/%d     Dynamic boost: %s     Quality: %s"] = "Etapa automática: %d/%d     Boost dinâmico: %s     Qualidade: %s",
+    ["Interface Position: %s"] = "Posição da Interface: %s",
+    ["Center"] = "Centro",
+    ["Top Left"] = "Superior Esquerdo",
+    ["Top Right"] = "Superior Direito",
+    ["Bottom Left"] = "Inferior Esquerdo",
+    ["Bottom Right"] = "Inferior Direito",
+    -- Notificações
+    ["Auto Optimization: stage %d/%d"] = "Otimização Automática: etapa %d/%d",
+    ["Dynamic Performance: boost engaged"] = "Desempenho Dinâmico: boost ativado",
+    ["Dynamic Performance: boost released"] = "Desempenho Dinâmico: boost liberado",
+    ["All changes were reverted"] = "Todas as alterações foram revertidas",
+    ["Graphics restored to default"] = "Gráficos restaurados ao padrão",
+    ["Default settings restored"] = "Configurações padrão restauradas",
+    ["FPS Booster Supremo ready"] = "FPS Booster Supremo pronto",
+    ["UI restored to default"] = "UI restaurada ao padrão",
+    -- Aba Luna Community
+    ["MOVEMENT"] = "MOVIMENTAÇÃO",
+    ["COSMETICS"] = "COSMÉTICOS",
+    ["PLAYERS"] = "JOGADORES",
+    ["Reduces textures, effects and visual details"] = "Reduz texturas, efeitos e detalhes visuais",
+    ["No Dash Cooldown"] = "Sem Cooldown de Dash",
+    ["Sets the local NoDashCooldown flag (game must read it)"] = "Define a flag local NoDashCooldown (o jogo precisa lê-la)",
+    ["Blocks the idle kick and keeps your AFK flag off"] = "Evita o kick por inatividade e mantém a flag AFK desligada",
+    ["Speed by Heartbeat"] = "Velocidade por Heartbeat",
+    ["Hold F (PC) or RUN (mobile) to run faster. Legs stay at 1x."] = "Segure F (PC) ou RUN (celular) para correr mais. Pernas em 1x.",
+    ["Speed Multiplier"] = "Multiplicador de Velocidade",
+    ["Adjust from 1.1x to 5.0x"] = "Ajuste de 1.1x a 5.0x",
+    ["Collects candy and opens Halloween doors"] = "Coleta doces e abre as portas de Halloween",
+    ["Fake headless head. Reapplies after you die."] = "Cabeça headless falsa. Reaplica após morrer.",
+    ["Fake Korblox right leg. Reapplies after you die."] = "Perna direita Korblox falsa. Reaplica após morrer.",
+    ["Ult bar, ping, platform and streak above players"] = "Barra de ult, ping, plataforma e streak sobre os jogadores",
+    ["Marks players using Death Counter above their body"] = "Marca jogadores usando Death Counter sobre o corpo",
+    ["Invisibility"] = "Invisibilidade",
+    ["Frozen pose + body fade. Works well with Auto Candy."] = "Pose congelada + corpo translúcido. Combina com Auto Candy.",
+    ["STATUS: OFF  •  HOLD F TO RUN"] = "STATUS: DESLIGADO  •  SEGURE F PARA CORRER",
+    ["STATUS: ON  •  HOLD F TO RUN"] = "STATUS: LIGADO  •  SEGURE F PARA CORRER",
+    ["STATUS: RUNNING  •  RELEASE F TO STOP"] = "STATUS: CORRENDO  •  SOLTE F PARA PARAR",
+    ["STATUS: OFF  •  HOLD RUN BUTTON"] = "STATUS: DESLIGADO  •  SEGURE O BOTÃO CORRER",
+    ["STATUS: ON  •  HOLD RUN BUTTON"] = "STATUS: LIGADO  •  SEGURE O BOTÃO CORRER",
+    ["STATUS: RUNNING  •  RELEASE BUTTON"] = "STATUS: CORRENDO  •  SOLTE O BOTÃO PARA PARAR",
+    ["RUN"] = "CORRER",
+    ["STATUS: OFF"] = "STATUS: DESLIGADO",
+    ["STATUS: STARTING..."] = "STATUS: INICIANDO...",
+    ["STATUS: COLLECTING CANDY"] = "STATUS: COLETANDO DOCES",
+    ["STATUS: OPENING NEAREST DOOR"] = "STATUS: ABRINDO A PORTA MAIS PRÓXIMA",
+    ["STATUS: DOOR INTERACTION COMPLETE"] = "STATUS: INTERAÇÃO COM A PORTA CONCLUÍDA",
+    ["STATUS: DOOR NOT READY - RETRYING"] = "STATUS: PORTA NÃO PRONTA - TENTANDO DE NOVO",
+    ["STATUS: NO CANDY OR DOORS FOUND"] = "STATUS: NENHUM DOCE OU PORTA ENCONTRADO",
+    ["STATUS: WAITING FOR CHARACTER"] = "STATUS: AGUARDANDO PERSONAGEM",
+    ["STATUS: WAITING FOR DOOR"] = "STATUS: AGUARDANDO PORTA",
+    ["STATUS: REQUIRED FOLDERS NOT FOUND"] = "STATUS: PASTAS NECESSÁRIAS NÃO ENCONTRADAS",
+    ["ULT: N/A"] = "ULT: N/D",
+    ["ULT READY"] = "ULT PRONTA",
+    ["ULT ACTIVE"] = "ULT ATIVA",
+    -- Aba Custom UI
+    ["THEME"] = "TEMA",
+    ["Water"] = "Água",
+    ["NEON COLOR"] = "COR NEON",
+    ["Default RGB"] = "RGB Padrão",
+    ["Cyan"] = "Ciano",
+    ["Purple"] = "Roxo",
+    ["Pink"] = "Rosa",
+    ["Green"] = "Verde",
+    ["Red"] = "Vermelho",
+    ["Orange"] = "Laranja",
+    ["Blue"] = "Azul",
+    ["Gold"] = "Dourado",
+    ["Lime"] = "Limão",
+    ["Silver"] = "Prata",
+    ["Violet"] = "Violeta",
+    ["Mint"] = "Menta",
+    ["Blood"] = "Sangue",
+    ["RGB MODES"] = "MODOS RGB",
+    ["ALL MODES"] = "TODOS OS MODOS",
+    ["HIDE MODES"] = "OCULTAR MODOS",
+    ["DEFAULT NEON"] = "NEON PADRÃO",
+    ["MOVING LIGHT"] = "LUZ EM MOVIMENTO",
+    ["Moving Light"] = "Luz em Movimento",
+    ["A shine band sweeps across the window"] = "Uma faixa de brilho percorre a janela",
+    ["White"] = "Branca",
+    ["Ice Blue"] = "Azul Gelo",
+    ["EFFECTS"] = "EFEITOS",
+    ["Neon Glow"] = "Brilho Neon",
+    ["Pulsing glow behind the window"] = "Brilho pulsante atrás da janela",
+    ["Theme Decorations"] = "Decorações do Tema",
+    ["Bats, bubbles or stars floating in the window"] = "Morcegos, bolhas, estrelas e outros itens flutuando na janela",
+    ["RESTORE DEFAULT UI"] = "RESTAURAR UI PADRÃO",
+    -- Nomes dos temas novos
+    ["Neon City"] = "Cidade Neon",
+    ["Forest"] = "Floresta",
+    ["Christmas"] = "Natal",
+    ["Ice"] = "Gelo",
+    ["Luxury Gold"] = "Ouro Luxo",
+    ["Galaxy"] = "Galáxia",
+    ["Candy"] = "Doces",
+    ["Toxic"] = "Tóxico",
+    ["Sunset"] = "Pôr do Sol",
+    ["Amethyst"] = "Ametista",
+    -- Abas novas
+    ["Others Scripts"] = "Outros Scripts",
+    ["Credits"] = "Créditos",
+    -- Aba Others Scripts
+    ["WARNING"] = "AVISO",
+    ["These scripts are loaded from external links and were not verified by Luna Community. Use at your own risk."] = "Estes scripts são carregados de links externos e não foram verificados pela Luna Community. Use por sua conta e risco.",
+    ["EXECUTE SCRIPT"] = "EXECUTAR SCRIPT",
+    ["LOADING..."] = "CARREGANDO...",
+    ["Script executed: %s"] = "Script executado: %s",
+    ["Script failed: %s"] = "Falha no script: %s",
+    ["Could not download: %s"] = "Não foi possível baixar: %s",
+    ["This executor does not support loadstring / HttpGet"] = "Este executor não suporta loadstring / HttpGet",
+    -- Aba Credits
+    ["Made by Luna Community"] = "Feito por Luna Community",
+    ["Discord server: https://discord.gg/qa8ZxwT9j"] = "Servidor do Discord: https://discord.gg/qa8ZxwT9j",
+    ["COPY DISCORD LINK"] = "COPIAR LINK DO DISCORD",
+    ["Discord link copied"] = "Link do Discord copiado",
+    ["Clipboard is not supported here"] = "Área de transferência não suportada aqui",
+}
+
+local function tr(en)
+    if lang == "pt" then
+        return PT[en] or en
+    end
+    return en
+end
+
+-- Define um texto dinâmico (chave em inglês) que acompanha o idioma escolhido
+local function setDyn(label, en)
+    dynTexts[label] = en
+    label.Text = tr(en)
+end
+
+local function applyLanguage()
+    if not ui.gui then return end
+    for _, inst in ipairs(ui.gui:GetDescendants()) do
+        if inst:IsA("TextLabel") or inst:IsA("TextButton") then
+            local dynamicKey = dynTexts[inst]
+            if dynamicKey then
+                inst.Text = tr(dynamicKey)
+            elseif not skipLocalize[inst] then
+                local original = textOrig[inst]
+                if not original and PT[inst.Text] then
+                    original = inst.Text
+                    textOrig[inst] = original
+                end
+                if original then inst.Text = tr(original) end
+            end
+        end
+    end
+    for _, hook in ipairs(langHooks) do
+        pcall(hook)
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- UTILIDADES DE INTERFACE
+-- ════════════════════════════════════════════════════════════════
+local function round(n)
+    return math.floor(n + 0.5)
+end
+
+local function create(className, props, parent)
+    local inst = Instance.new(className)
+    for property, value in pairs(props) do
+        inst[property] = value
+    end
+    if parent then inst.Parent = parent end
+    return inst
+end
+
+local function tween(inst, duration, props, style, direction)
+    local t = TweenService:Create(
+        inst,
+        TweenInfo.new(duration, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out),
+        props
+    )
+    t:Play()
+    return t
+end
+
+local function addCorner(inst, radius)
+    return create("UICorner", {CornerRadius = UDim.new(0, radius)}, inst)
+end
+
+local function addCircle(inst)
+    return create("UICorner", {CornerRadius = UDim.new(1, 0)}, inst)
+end
+
+local function addStroke(inst, color, thickness, transparency)
+    return create("UIStroke", {
+        Color = color,
+        Thickness = thickness or 1,
+        Transparency = transparency or 0,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, inst)
+end
+
+local function addRGBGradient(parent, phase)
+    local gradient = create("UIGradient", {Color = currentSequence, Rotation = phase or 0}, parent)
+    rgbGradients[#rgbGradients + 1] = {gradient = gradient, phase = phase or 0}
+    return gradient
+end
+
+local function updateRGB()
+    local angle = (os.clock() * 60) % 360
+    local i = 1
+    while i <= #rgbGradients do
+        local entry = rgbGradients[i]
+        if entry.gradient.Parent then
+            entry.gradient.Rotation = (angle + entry.phase) % 360
+            i += 1
+        else
+            table.remove(rgbGradients, i)
+        end
+    end
+end
+
+local function resetRGBRotation()
+    for _, entry in ipairs(rgbGradients) do
+        if entry.gradient.Parent then
+            entry.gradient.Rotation = entry.phase
+        end
+    end
+end
+
+local function nextOrder(page)
+    pageOrder[page] = (pageOrder[page] or 0) + 1
+    return pageOrder[page]
+end
+
+local function fpsColor(fps)
+    if fps >= 55 then return C.green end
+    if fps >= 40 then return C.cyan end
+    if fps >= 25 then return C.yellow end
+    return C.red
+end
+
+local function fpsLabel(fps)
+    if fps >= 55 then return "EXCELLENT" end
+    if fps >= 40 then return "GOOD" end
+    if fps >= 25 then return "AVERAGE" end
+    return "CRITICAL"
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- MOTOR DE OTIMIZAÇÃO — sistema de "claims" (alterações restauráveis)
+-- Cada propriedade alterada guarda o valor original + máscara de donos.
+-- Quando o último dono libera, o valor original é restaurado.
+-- ════════════════════════════════════════════════════════════════
+local claims = setmetatable({}, {__mode = "k"}) -- instância -> {prop -> {orig, mask}}
+local activeMask = 0
+local smartHeld = false
+local requestCount = {}
+local scanning = false
+local draining = false
+local scanPending = 0
+
+local function getProperty(inst, prop) return inst[prop] end
+local function setProperty(inst, prop, value) inst[prop] = value end
+
+local function claimProp(inst, prop, value, bit, force)
+    local per = claims[inst]
+    local entry = per and per[prop]
+    if entry then
+        if band(entry.mask, bit) ~= 0 and not force then return end
+        entry.mask = bor(entry.mask, bit)
+        pcall(setProperty, inst, prop, value)
+        return
+    end
+    local ok, original = pcall(getProperty, inst, prop)
+    if not ok or original == value then return end
+    if not per then
+        per = {}
+        claims[inst] = per
+    end
+    per[prop] = {orig = original, mask = bit}
+    pcall(setProperty, inst, prop, value)
+end
+
+local function heldMask()
+    return bor(activeMask, smartHeld and B.Smart or 0)
+end
+
+-- Libera (restaura) todas as propriedades pertencentes aos bits informados.
+-- Executa em lotes por frame; aborta para bits que foram reativados.
+local function releaseBits(mask, onDone)
+    task.spawn(function()
+        local keys = {}
+        for inst in pairs(claims) do keys[#keys + 1] = inst end
+        local start = os.clock()
+        for i = 1, #keys do
+            local inst = keys[i]
+            local per = claims[inst]
+            if per then
+                local releasable = band(mask, bnot(heldMask()))
+                if releasable ~= 0 then
+                    for prop, entry in pairs(per) do
+                        if band(entry.mask, releasable) ~= 0 then
+                            entry.mask = band(entry.mask, bnot(releasable))
+                            if entry.mask == 0 then
+                                pcall(setProperty, inst, prop, entry.orig)
+                                per[prop] = nil
+                            end
+                        end
+                    end
+                    if next(per) == nil then claims[inst] = nil end
+                end
+            end
+            if os.clock() - start > SCAN_BUDGET then
+                task.wait()
+                start = os.clock()
+            end
+        end
+        if onDone then onDone() end
+    end)
+end
+
+-- ── Classificação por nome (palavras inteiras, com cache) ─────────
+local WORDS = {}
+local function registerWords(bit, list)
+    for _, word in ipairs(list) do
+        WORDS[word] = bor(WORDS[word] or 0, bit)
+    end
+end
+registerWords(B.Trees, {"tree", "pine", "palm", "oak", "birch", "spruce", "maple", "willow", "cedar",
+    "foliage", "leaf", "leaves", "forest", "trunk", "cactus", "bamboo"})
+registerWords(B.Mountains, {"mountain", "hill", "cliff", "volcano", "boulder", "rock", "peak", "crag"})
+registerWords(B.Grass, {"grass", "grasses", "flower", "weed", "bush", "shrub", "fern", "vegetation",
+    "hedge", "reed", "clover", "mushroom", "sprout", "moss"})
+registerWords(B.Decorations, {"decor", "decoration", "deco", "ornament", "statue", "vase", "painting",
+    "banner", "flag", "balloon", "garland", "wreath", "trophy"})
+
+local nameMaskCache = {}
+local function getNameMask(name)
+    local cached = nameMaskCache[name]
+    if cached then return cached end
+    local mask = 0
+    local spaced = string.lower((string.gsub(name, "(%l)(%u)", "%1 %2")))
+    for token in string.gmatch(spaced, "%a+") do
+        local direct = WORDS[token]
+        if direct then mask = bor(mask, direct) end
+        if string.sub(token, -1) == "s" then
+            local singular = WORDS[string.sub(token, 1, -2)]
+            if singular then mask = bor(mask, singular) end
+        end
+    end
+    nameMaskCache[name] = mask
+    return mask
+end
+
+-- ── Informações de classe (cache por ClassName) ───────────────────
+local PARTICLE_CLASSES = {ParticleEmitter = true, Trail = true, Beam = true, Fire = true, Smoke = true, Sparkles = true}
+local POSTFX_CLASSES = {BloomEffect = true, BlurEffect = true, DepthOfFieldEffect = true, SunRaysEffect = true}
+local BLOCKERS = {
+    ProximityPrompt = true, ClickDetector = true, Humanoid = true,
+    Seat = true, VehicleSeat = true, SpawnLocation = true,
+}
+
+local classInfoCache = {}
+local function getClassInfo(inst)
+    local className = inst.ClassName
+    local info = classInfoCache[className]
+    if info then return info end
+    local isPart = inst:IsA("BasePart") and not inst:IsA("Terrain")
+    info = {
+        part = isPart,
+        container = isPart or inst:IsA("Model") or inst:IsA("Folder"),
+        face = inst:IsA("FaceInstance"),
+        emitter = PARTICLE_CLASSES[className] == true,
+        light = inst:IsA("Light"),
+        postfx = POSTFX_CLASSES[className] == true,
+        mesh = className == "MeshPart" or inst:IsA("PartOperation"),
+        meshPart = className == "MeshPart",
+    }
+    info.needsProtection = info.part or info.face or info.emitter or info.light
+    info.interesting = info.container or info.face or info.emitter or info.light or info.postfx
+    classInfoCache[className] = info
+    return info
+end
+
+-- ── Proteção: personagens, veículos, assentos, spawns, câmera ─────
+local protCache = setmetatable({}, {__mode = "k"})
+local function isProtectedInstance(inst)
+    local current = inst
+    while current and current ~= Workspace do
+        local className = current.ClassName
+        if className == "Camera" or className == "Tool" or className == "Seat"
+            or className == "VehicleSeat" or className == "SpawnLocation" then
+            return true
+        end
+        if current:IsA("Model") then
+            local cached = protCache[current]
+            if cached == nil then
+                cached = current:FindFirstChildOfClass("Humanoid") ~= nil
+                    or current:FindFirstChildOfClass("VehicleSeat") ~= nil
+                protCache[current] = cached
+            end
+            if cached then return true end
+        end
+        current = current.Parent
+    end
+    return false
+end
+
+-- ── Raízes correspondidas por nome (árvores, grama, etc.) ─────────
+local matchedRoots = {}
+local function resetRoots(bit)
+    matchedRoots[bit] = setmetatable({}, {__mode = "k"})
+end
+for _, name in ipairs(EFFECT_ORDER) do resetRoots(B[name]) end
+
+local function hideClaim(part, bit)
+    claimProp(part, "LocalTransparencyModifier", 1, bit)
+end
+
+local function simplifyClaim(part, bit)
+    claimProp(part, "Material", Enum.Material.SmoothPlastic, bit)
+    claimProp(part, "Reflectance", 0, bit)
+    claimProp(part, "CastShadow", false, bit)
+    if part:IsA("MeshPart") or part:IsA("PartOperation") then
+        claimProp(part, "RenderFidelity", Enum.RenderFidelity.Performance, bit)
+    end
+end
+
+local function applyByName(inst, info, bit, nameMask, claimer, checkBlockers)
+    if not info.container then return end
+    local roots = matchedRoots[bit]
+    if next(roots) ~= nil then
+        local current = inst
+        while current and current ~= Workspace do
+            if roots[current] then
+                if info.part then claimer(inst, bit) end
+                return
+            end
+            current = current.Parent
+        end
+    end
+    if band(nameMask, bit) == 0 then return end
+    if isProtectedInstance(inst) then return end
+    local descendants = inst:GetDescendants()
+    if checkBlockers then
+        if BLOCKERS[inst.ClassName] then return end
+        for i = 1, #descendants do
+            if BLOCKERS[descendants[i].ClassName] then return end
+        end
+    end
+    roots[inst] = true
+    if info.part then claimer(inst, bit) end
+    for i = 1, #descendants do
+        local d = descendants[i]
+        if getClassInfo(d).part then claimer(d, bit) end
+    end
+end
+
+local function applyAll(inst, mask)
+    if not inst.Parent then return end
+    local info = getClassInfo(inst)
+    if not info.interesting then return end
+    if info.needsProtection and isProtectedInstance(inst) then return end
+
+    local nameMask = 0
+    if info.container and band(mask, NAME_BITS) ~= 0 then
+        nameMask = getNameMask(inst.Name)
+    end
+
+    if band(mask, B.Trees) ~= 0 then applyByName(inst, info, B.Trees, nameMask, hideClaim, true) end
+    if band(mask, B.Grass) ~= 0 then applyByName(inst, info, B.Grass, nameMask, hideClaim, true) end
+    if band(mask, B.Decorations) ~= 0 then applyByName(inst, info, B.Decorations, nameMask, hideClaim, true) end
+    if band(mask, B.Mountains) ~= 0 then applyByName(inst, info, B.Mountains, nameMask, simplifyClaim, false) end
+
+    if band(mask, B.Textures) ~= 0 then
+        if info.face then
+            claimProp(inst, "Transparency", 1, B.Textures)
+        elseif info.part then
+            claimProp(inst, "Material", Enum.Material.SmoothPlastic, B.Textures)
+            claimProp(inst, "Reflectance", 0, B.Textures)
+            if info.meshPart then claimProp(inst, "TextureID", "", B.Textures) end
+        end
+    end
+
+    if band(mask, B.Particles) ~= 0 and info.emitter then
+        claimProp(inst, "Enabled", false, B.Particles)
+    end
+
+    if band(mask, B.Shadows) ~= 0 then
+        if info.part then
+            claimProp(inst, "CastShadow", false, B.Shadows)
+        elseif info.light then
+            claimProp(inst, "Shadows", false, B.Shadows)
+        end
+    end
+
+    if band(mask, B.VisualFX) ~= 0 and info.postfx then
+        claimProp(inst, "Enabled", false, B.VisualFX)
+    end
+
+    if band(mask, B.Meshes) ~= 0 and info.mesh then
+        claimProp(inst, "RenderFidelity", Enum.RenderFidelity.Performance, B.Meshes)
+    end
+end
+
+-- ── Fila de objetos adicionados depois (processada em lotes) ──────
+local queue, qHead, qTail = {}, 1, 0
+
+local function drainQueue()
+    if draining then return end
+    draining = true
+    task.spawn(function()
+        local start = os.clock()
+        while qHead <= qTail and activeMask ~= 0 and alive do
+            local inst = queue[qHead]
+            queue[qHead] = nil
+            qHead += 1
+            if inst then pcall(applyAll, inst, activeMask) end
+            if os.clock() - start > SCAN_BUDGET then
+                task.wait()
+                start = os.clock()
+            end
+        end
+        if activeMask == 0 then table.clear(queue) end
+        if qHead > qTail then
+            qHead, qTail = 1, 0
+        end
+        draining = false
+        table.clear(protCache)
+        if updateStatus then updateStatus() end
+    end)
+end
+
+local function onDescendantAdded(inst)
+    if activeMask == 0 then return end
+    qTail += 1
+    queue[qTail] = inst
+    drainQueue()
+end
+
+local watchConns = {}
+local function ensureWatchers()
+    if #watchConns > 0 then return end
+    watchConns[1] = Workspace.DescendantAdded:Connect(onDescendantAdded)
+    watchConns[2] = Lighting.DescendantAdded:Connect(onDescendantAdded)
+end
+
+local function dropWatchers()
+    for i = #watchConns, 1, -1 do
+        watchConns[i]:Disconnect()
+        watchConns[i] = nil
+    end
+    table.clear(queue)
+    qHead, qTail = 1, 0
+end
+
+-- ── Varredura inicial (uma única GetDescendants para vários efeitos) ──
+local function requestScan(mask)
+    scanPending = bor(scanPending, mask)
+    if scanning then return end
+    scanning = true
+    if updateStatus then updateStatus() end
+    task.spawn(function()
+        while scanPending ~= 0 and alive do
+            local mask2 = scanPending
+            scanPending = 0
+            local list = Workspace:GetDescendants()
+            if band(mask2, B.VisualFX) ~= 0 then
+                for _, d in ipairs(Lighting:GetDescendants()) do list[#list + 1] = d end
+            end
+            local start = os.clock()
+            for i = 1, #list do
+                local m = band(mask2, activeMask)
+                if m == 0 then break end
+                pcall(applyAll, list[i], m)
+                if os.clock() - start > SCAN_BUDGET then
+                    task.wait()
+                    start = os.clock()
+                end
+            end
+        end
+        scanning = false
+        table.clear(protCache)
+        if updateStatus then updateStatus() end
+    end)
+end
+
+-- ── Ajustes globais (Lighting, Terrain, Rendering) ────────────────
+local renderingCache
+local function getRendering()
+    if renderingCache then return renderingCache end
+    local ok, rendering = pcall(function() return settings().Rendering end)
+    if ok then renderingCache = rendering end
+    return renderingCache
+end
+
+local function getTerrain()
+    return Workspace:FindFirstChildOfClass("Terrain")
+end
+
+local effectEngage = {
+    Grass = function()
+        local terrain = getTerrain()
+        if terrain then claimProp(terrain, "Decoration", false, B.Grass) end
+    end,
+    Shadows = function()
+        claimProp(Lighting, "GlobalShadows", false, B.Shadows)
+    end,
+    LowGraphics = function()
+        local rendering = getRendering()
+        if rendering then
+            claimProp(rendering, "QualityLevel", Enum.QualityLevel.Level01, B.LowGraphics, true)
+        end
+        local terrain = getTerrain()
+        if terrain then
+            claimProp(terrain, "WaterWaveSize", 0, B.LowGraphics)
+            claimProp(terrain, "WaterWaveSpeed", 0, B.LowGraphics)
+            claimProp(terrain, "WaterReflectance", 0, B.LowGraphics)
+        end
+    end,
+}
+
+local SCANNED_EFFECTS = {
+    Trees = true, Mountains = true, Grass = true, Decorations = true, Textures = true,
+    Particles = true, Shadows = true, VisualFX = true, Meshes = true,
+}
+
+local function engageEffect(name)
+    local bit = B[name]
+    activeMask = bor(activeMask, bit)
+    ensureWatchers()
+    local engage = effectEngage[name]
+    if engage then pcall(engage) end
+    if SCANNED_EFFECTS[name] then requestScan(bit) end
+    if updateStatus then updateStatus() end
+end
+
+local function disengageEffect(name)
+    local bit = B[name]
+    activeMask = band(activeMask, bnot(bit))
+    resetRoots(bit)
+    releaseBits(bit)
+    if activeMask == 0 then dropWatchers() end
+    if updateStatus then updateStatus() end
+end
+
+local function requestEffect(name)
+    local n = (requestCount[name] or 0) + 1
+    requestCount[name] = n
+    if n == 1 then engageEffect(name) end
+end
+
+local function releaseEffect(name)
+    local n = requestCount[name] or 0
+    if n <= 0 then return end
+    n -= 1
+    requestCount[name] = n
+    if n == 0 then disengageEffect(name) end
+end
+
+local function countBits(mask)
+    local count = 0
+    for _, name in ipairs(EFFECT_ORDER) do
+        if band(mask, B[name]) ~= 0 then count += 1 end
+    end
+    return count
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- AUTOMAÇÃO: Automatic Optimization, Dynamic Performance, Smart Graphics
+-- ════════════════════════════════════════════════════════════════
+local AUTO_STAGES = {
+    {"Particles", "Shadows", "VisualFX"},
+    {"Textures", "LowGraphics", "Meshes", "Decorations"},
+    {"Trees", "Grass", "Mountains"},
+}
+local DYN_EFFECTS = {"Particles", "Shadows", "VisualFX"}
+
+local auto = {stage = 0, low = 0, cooldown = 0, owned = {}}
+local dyn = {active = false, low = 0, high = 0, cooldown = 0, owned = {}}
+local smart = {level = nil, base = 8, low = 0, high = 0, claimed = false, lowWasActive = false}
+local memoryTimer = 0
+
+local function ownedRequest(owner, name)
+    if not owner[name] then
+        owner[name] = true
+        requestEffect(name)
+    end
+end
+
+local function ownedReleaseAll(owner)
+    for name in pairs(owner) do
+        owner[name] = nil
+        releaseEffect(name)
+    end
+end
+
+local function autoStart()
+    auto.stage, auto.low, auto.cooldown = 0, 0, 0
+end
+
+local function autoStop()
+    ownedReleaseAll(auto.owned)
+    auto.stage, auto.low, auto.cooldown = 0, 0, 0
+end
+
+local function autoStep(fps)
+    if auto.cooldown > 0 then
+        auto.cooldown -= 1
+        return
+    end
+    if fps < 25 then auto.low += 1 else auto.low = 0 end
+    if auto.low >= 6 and auto.stage < #AUTO_STAGES then
+        auto.stage += 1
+        auto.low = 0
+        auto.cooldown = 10
+        for _, name in ipairs(AUTO_STAGES[auto.stage]) do ownedRequest(auto.owned, name) end
+        if notify then notify("Auto Optimization: stage %d/%d", C.yellow, auto.stage, #AUTO_STAGES) end
+    end
+end
+
+local function dynStart()
+    dyn.active, dyn.low, dyn.high, dyn.cooldown = false, 0, 0, 0
+end
+
+local function dynStop()
+    ownedReleaseAll(dyn.owned)
+    dyn.active, dyn.low, dyn.high, dyn.cooldown = false, 0, 0, 0
+end
+
+local function dynamicStep(fps)
+    if dyn.cooldown > 0 then
+        dyn.cooldown -= 1
+        return
+    end
+    if not dyn.active then
+        if fps < 35 then dyn.low += 1 else dyn.low = 0 end
+        if dyn.low >= 4 then
+            dyn.active, dyn.low, dyn.high, dyn.cooldown = true, 0, 0, 6
+            for _, name in ipairs(DYN_EFFECTS) do ownedRequest(dyn.owned, name) end
+            if notify then notify("Dynamic Performance: boost engaged", C.yellow) end
+        end
+    else
+        if fps >= 55 then dyn.high += 1 else dyn.high = 0 end
+        if dyn.high >= 16 then
+            dyn.active, dyn.low, dyn.high, dyn.cooldown = false, 0, 0, 6
+            ownedReleaseAll(dyn.owned)
+            if notify then notify("Dynamic Performance: boost released", C.green) end
+        end
+    end
+end
+
+local function enumForLevel(level)
+    local ok, item = pcall(function()
+        return Enum.QualityLevel[string.format("Level%02d", level)]
+    end)
+    if ok then return item end
+    return nil
+end
+
+local function applySmartLevel()
+    local rendering = getRendering()
+    local item = enumForLevel(smart.level)
+    if rendering and item then
+        claimProp(rendering, "QualityLevel", item, B.Smart, true)
+        smart.claimed = true
+    end
+end
+
+local function smartStart()
+    smartHeld = true
+    smart.level, smart.low, smart.high, smart.claimed, smart.lowWasActive = nil, 0, 0, false, false
+end
+
+local function smartStop()
+    smartHeld = false
+    smart.level, smart.claimed = nil, false
+    releaseBits(B.Smart)
+end
+
+local function smartStep(fps)
+    local rendering = getRendering()
+    if not rendering then return end
+    if (requestCount.LowGraphics or 0) > 0 then
+        smart.lowWasActive = true
+        smart.low, smart.high = 0, 0
+        return
+    end
+    if smart.lowWasActive then
+        smart.lowWasActive = false
+        if smart.claimed and smart.level then applySmartLevel() end
+    end
+    if smart.level == nil then
+        local ok, current = pcall(getProperty, rendering, "QualityLevel")
+        local value = (ok and current and current.Value) or 0
+        smart.base = (value == 0) and 8 or math.clamp(value, 1, 10)
+        smart.level = smart.base
+    end
+    if fps < 40 then
+        smart.low += 1
+        smart.high = 0
+    elseif fps >= 58 then
+        smart.high += 1
+        smart.low = 0
+    else
+        smart.low, smart.high = 0, 0
+    end
+    if smart.low >= 6 and smart.level > 1 then
+        smart.level -= 1
+        smart.low = 0
+        applySmartLevel()
+    elseif smart.high >= 20 and smart.level < smart.base then
+        smart.level += 1
+        smart.high = 0
+        applySmartLevel()
+    end
+end
+
+local function flushCaches()
+    table.clear(protCache)
+    table.clear(nameMaskCache)
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- FEATURES (cada toggle da interface)
+-- ════════════════════════════════════════════════════════════════
+local FEATURES = {
+    potato = {effects = {"Textures", "Particles", "Shadows", "Decorations", "VisualFX"}},
+    trees = {effects = {"Trees"}},
+    mountains = {effects = {"Mountains"}},
+    grass = {effects = {"Grass"}},
+    decorations = {effects = {"Decorations"}},
+    textures = {effects = {"Textures"}},
+    particles = {effects = {"Particles"}},
+    shadows = {effects = {"Shadows"}},
+    lowgfx = {effects = {"LowGraphics", "Meshes"}},
+    ultra = {effects = EFFECT_ORDER},
+    autoOpt = {start = autoStart, stop = autoStop},
+    smart = {start = smartStart, stop = smartStop},
+    dynamic = {start = dynStart, stop = dynStop},
+    reduceFX = {effects = {"VisualFX", "Particles"}},
+    memory = {effects = {"Meshes"}, start = function() memoryTimer = 0 end},
+    lunaBoost = {effects = {"Textures", "Particles", "Trees"}}, -- FPS Boost da aba Luna Community
+}
+
+local function setFeature(key, on)
+    local def = FEATURES[key]
+    if not def then return end
+    on = on and true or false
+    if (state[key] or false) == on then return end
+    state[key] = on
+    if on then
+        if def.effects then
+            for _, name in ipairs(def.effects) do requestEffect(name) end
+        end
+        if def.start then pcall(def.start) end
+    else
+        if def.stop then pcall(def.stop) end
+        if def.effects then
+            for _, name in ipairs(def.effects) do releaseEffect(name) end
+        end
+    end
+    if refreshToggle then refreshToggle(key) end
+    if updateStatus then updateStatus() end
+end
+
+local function disableAllFeatures()
+    for key in pairs(FEATURES) do
+        if state[key] then pcall(setFeature, key, false) end
+    end
+end
+
+-- Botão de emergência: desfaz tudo e garante que nada ficou para trás
+local function emergencyRestore()
+    if lunaDisableAll then pcall(lunaDisableAll) end
+    disableAllFeatures()
+    ownedReleaseAll(auto.owned)
+    ownedReleaseAll(dyn.owned)
+    for _, name in ipairs(EFFECT_ORDER) do
+        requestCount[name] = 0
+        resetRoots(B[name])
+    end
+    activeMask = 0
+    smartHeld = false
+    scanPending = 0
+    dropWatchers()
+    flushCaches()
+    releaseBits(ALL_BITS_MASK, function()
+        if notify then notify("All changes were reverted", C.green) end
+        if updateStatus then updateStatus() end
+    end)
+    if updateStatus then updateStatus() end
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- MONITOR DE DESEMPENHO
+-- ════════════════════════════════════════════════════════════════
+local function readPing()
+    local ok, value = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    if ok and type(value) == "number" then return value end
+    local ok2, value2 = pcall(function() return LocalPlayer:GetNetworkPing() * 1000 end)
+    if ok2 and type(value2) == "number" then return value2 end
+    return 0
+end
+
+local function readMemory()
+    local ok, value = pcall(function() return Stats:GetTotalMemoryUsageMb() end)
+    if ok and type(value) == "number" then return value end
+    return 0
+end
+
+local function onFpsSample(fps)
+    if monitor.samples <= 4 then return end
+    if state.autoOpt then autoStep(fps) end
+    if state.dynamic then dynamicStep(fps) end
+    if state.smart then smartStep(fps) end
+end
+
+local function pushSample()
+    local fps = monitor.frames / monitor.elapsed
+    monitor.fps = fps
+    monitor.frameMs = (monitor.elapsed / monitor.frames) * 1000
+    monitor.worstMs = monitor.worstDt * 1000
+    monitor.frames, monitor.elapsed, monitor.worstDt = 0, 0, 0
+    monitor.samples += 1
+
+    local history = monitor.history
+    history[#history + 1] = fps
+    if #history > HISTORY_SIZE then table.remove(history, 1) end
+
+    if monitor.samples > 2 then
+        if not monitor.maxFps or fps > monitor.maxFps then monitor.maxFps = fps end
+        if not monitor.minFps or fps < monitor.minFps then monitor.minFps = fps end
+    end
+
+    monitor.ping = readPing()
+    monitor.memory = readMemory()
+
+    if updateHUD then updateHUD() end
+    if ui.currentTab == "monitor" and ui.window and ui.window.Visible then
+        if updateMonitorUI then updateMonitorUI() end
+        if updateGraph then updateGraph() end
+    end
+    if updateStatus then updateStatus() end
+    onFpsSample(fps)
+end
+-- ════════════════════════════════════════════════════════════════
+-- COMPONENTES DE INTERFACE
+-- ════════════════════════════════════════════════════════════════
+local function clampToScreen(pos)
+    local viewport = ui.gui.AbsoluteSize
+    local size = ui.window.AbsoluteSize
+    local x = math.clamp(pos.X, -size.X + 90, math.max(-size.X + 90, viewport.X - 90))
+    local y = math.clamp(pos.Y, 0, math.max(0, viewport.Y - 50))
+    return Vector2.new(x, y)
+end
+
+local function makeDraggable(handle, target)
+    track(handle.InputBegan:Connect(function(input)
+        local inputType = input.UserInputType
+        if inputType ~= Enum.UserInputType.MouseButton1 and inputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        local dragStart = input.Position
+        local startPos = target.AbsolutePosition
+        local moveConn, endConn
+        moveConn = UserInputService.InputChanged:Connect(function(changed)
+            if changed.UserInputType == Enum.UserInputType.MouseMovement or changed == input then
+                local delta = changed.Position - dragStart
+                local pos = clampToScreen(Vector2.new(startPos.X + delta.X, startPos.Y + delta.Y))
+                target.Position = UDim2.fromOffset(pos.X, pos.Y)
+            end
+        end)
+        endConn = input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                moveConn:Disconnect()
+                endConn:Disconnect()
+            end
+        end)
+    end))
+end
+
+local function createPage(parent, name)
+    local page = create("ScrollingFrame", {
+        Name = name,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = IS_TOUCH and 5 or 3,
+        ScrollBarImageColor3 = C.cyan,
+        CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        Visible = false,
+    }, parent)
+    create("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, page)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 14),
+        PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 14),
+    }, page)
+    return page
+end
+
+local function createSection(page, text)
+    return create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = text,
+        TextSize = 11,
+        TextColor3 = C.sub,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        LayoutOrder = nextOrder(page),
+    }, page)
+end
+
+local function createInfoCard(page, height)
+    local card = create("Frame", {
+        Size = UDim2.new(1, 0, 0, height or 40),
+        BackgroundColor3 = C.row,
+        BackgroundTransparency = 0.05,
+        LayoutOrder = nextOrder(page),
+    }, page)
+    addCorner(card, 10)
+    addStroke(card, C.stroke, 1, 0.2)
+    local label = create("TextLabel", {
+        Position = UDim2.fromOffset(14, 0),
+        Size = UDim2.new(1, -28, 1, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamMedium,
+        Text = "--",
+        TextSize = 12,
+        TextColor3 = C.text,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, card)
+    return label
+end
+
+local function createToggle(page, id, title, description, getter, setter, accent)
+    local hoverColor = accent or C.cyan
+    local row = create("Frame", {
+        Name = id,
+        Size = UDim2.new(1, 0, 0, 56),
+        BackgroundColor3 = C.row,
+        BackgroundTransparency = 0.05,
+        LayoutOrder = nextOrder(page),
+    }, page)
+    addCorner(row, 10)
+    local rowStroke = addStroke(row, C.stroke, 1, 0.2)
+
+    create("TextLabel", {
+        Position = UDim2.fromOffset(14, 9),
+        Size = UDim2.new(1, -110, 0, 18),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = title,
+        TextSize = 14,
+        TextColor3 = C.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+    create("TextLabel", {
+        Position = UDim2.fromOffset(14, 29),
+        Size = UDim2.new(1, -110, 0, 16),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = description,
+        TextSize = 11,
+        TextColor3 = C.sub,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    local statusText = create("TextLabel", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -44, 0.5, 0),
+        Size = UDim2.fromOffset(36, 18),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = "OFF",
+        TextSize = 12,
+        TextColor3 = C.red,
+        TextXAlignment = Enum.TextXAlignment.Right,
+    }, row)
+
+    local indicator = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(1, -24, 0.5, 0),
+        Size = UDim2.fromOffset(18, 18),
+        BackgroundColor3 = C.red,
+    }, row)
+    addCircle(indicator)
+    local indicatorStroke = addStroke(indicator, C.red, 2, 0.55)
+
+    local button = create("TextButton", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        AutoButtonColor = false,
+    }, row)
+
+    track(button.MouseEnter:Connect(function()
+        tween(rowStroke, 0.15, {Color = hoverColor})
+        tween(row, 0.15, {BackgroundColor3 = C.rowHover})
+    end))
+    track(button.MouseLeave:Connect(function()
+        tween(rowStroke, 0.15, {Color = C.stroke})
+        tween(row, 0.15, {BackgroundColor3 = C.row})
+    end))
+    track(button.Activated:Connect(function()
+        setter(not getter())
+    end))
+
+    toggleVisuals[id] = function(instant)
+        local on = getter() and true or false
+        local color = on and C.green or C.red
+        statusText.Text = on and "ON" or "OFF"
+        if instant then
+            indicator.BackgroundColor3 = color
+            indicatorStroke.Color = color
+            statusText.TextColor3 = color
+        else
+            tween(indicator, 0.25, {BackgroundColor3 = color})
+            tween(indicatorStroke, 0.25, {Color = color})
+            tween(statusText, 0.25, {TextColor3 = color})
+            indicator.Size = UDim2.fromOffset(24, 24)
+            tween(indicator, 0.25, {Size = UDim2.fromOffset(18, 18)}, Enum.EasingStyle.Back)
+        end
+    end
+    toggleVisuals[id](true)
+end
+
+refreshToggle = function(id, instant)
+    local visual = toggleVisuals[id]
+    if visual then visual(instant) end
+end
+
+local function createFeatureToggle(page, key, title, description, accent)
+    createToggle(page, key, title, description,
+        function() return state[key] end,
+        function(value) setFeature(key, value) end,
+        accent)
+end
+
+local function createButton(page, text, color, callback, height)
+    local button = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, height or 40),
+        BackgroundColor3 = C.row,
+        AutoButtonColor = false,
+        Font = Enum.Font.GothamBold,
+        Text = text,
+        TextSize = 13,
+        TextColor3 = color,
+        LayoutOrder = nextOrder(page),
+    }, page)
+    addCorner(button, 10)
+    local stroke = addStroke(button, color, 1.5, 0.35)
+    track(button.MouseEnter:Connect(function()
+        tween(button, 0.15, {BackgroundColor3 = C.row:Lerp(color, 0.18)})
+        tween(stroke, 0.15, {Transparency = 0})
+    end))
+    track(button.MouseLeave:Connect(function()
+        tween(button, 0.15, {BackgroundColor3 = C.row})
+        tween(stroke, 0.15, {Transparency = 0.35})
+    end))
+    track(button.Activated:Connect(callback))
+    return button
+end
+
+local function createStatCard(parent, title, order, withDot)
+    local card = create("Frame", {
+        BackgroundColor3 = C.row,
+        BackgroundTransparency = 0.05,
+        LayoutOrder = order,
+    }, parent)
+    addCorner(card, 10)
+    addStroke(card, C.stroke, 1, 0.2)
+    create("TextLabel", {
+        Position = UDim2.fromOffset(12, 8),
+        Size = UDim2.new(1, -24, 0, 14),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamMedium,
+        Text = title,
+        TextSize = 11,
+        TextColor3 = C.sub,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, card)
+    local dot
+    local offset = 12
+    if withDot then
+        dot = create("Frame", {
+            Position = UDim2.fromOffset(12, 33),
+            Size = UDim2.fromOffset(14, 14),
+            BackgroundColor3 = C.red,
+        }, card)
+        addCircle(dot)
+        offset = 34
+    end
+    local value = create("TextLabel", {
+        Position = UDim2.fromOffset(offset, 24),
+        Size = UDim2.new(1, -offset - 10, 0, 30),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBlack,
+        Text = "--",
+        TextSize = 20,
+        TextColor3 = C.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, card)
+    return value, dot
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- ATUALIZAÇÕES DE INTERFACE (HUD, status, monitor)
+-- ════════════════════════════════════════════════════════════════
+updateHUD = function()
+    if not ui.hud then return end
+    local show = hudReady and (config.showFps or config.showPing)
+    ui.hud.Visible = show and true or false
+    ui.hudFps.Visible = config.showFps
+    ui.hudPing.Visible = config.showPing
+    if monitor.fps > 0 then
+        ui.hudFps.Text = string.format("FPS %d", round(monitor.fps))
+        ui.hudFps.TextColor3 = fpsColor(monitor.fps)
+        ui.hudPing.Text = string.format("PING %d ms", round(monitor.ping))
+    end
+end
+
+updateStatus = function()
+    local active = countBits(band(activeMask, ALL_EFFECTS_MASK))
+    local stateKey
+    if scanning or draining then
+        stateKey = "Applying..."
+    elseif active > 0 then
+        stateKey = "Optimized"
+    else
+        stateKey = "Idle"
+    end
+    local stateText = tr(stateKey)
+    if ui.boosterInfo then
+        ui.boosterInfo.Text = string.format(tr("Active optimizations: %d / %d     State: %s"), active, #EFFECT_ORDER, stateText)
+    end
+    if monUI.system then
+        monUI.system.Text = string.format("%s (%d)", stateText, active)
+    end
+    if ui.advInfo and ui.currentTab == "advanced" then
+        local quality = "?"
+        local rendering = getRendering()
+        if rendering then
+            local ok, name = pcall(function() return rendering.QualityLevel.Name end)
+            if ok then quality = name end
+        end
+        ui.advInfo.Text = string.format(tr("Auto stage: %d/%d     Dynamic boost: %s     Quality: %s"),
+            auto.stage, #AUTO_STAGES, dyn.active and tr("ACTIVE") or tr("standby"), quality)
+    end
+end
+
+updateMonitorUI = function()
+    if not monUI.fps then return end
+    local fps = monitor.fps
+    local color = fpsColor(fps)
+    monUI.fps.Text = tostring(round(fps))
+    monUI.fps.TextColor3 = color
+    monUI.ping.Text = string.format("%d ms", round(monitor.ping))
+    monUI.frame.Text = string.format("%.1f ms", monitor.frameMs)
+    monUI.memory.Text = string.format("%d MB", round(monitor.memory))
+    monUI.perf.Text = tr(fpsLabel(fps))
+    monUI.perf.TextColor3 = color
+    monUI.perfDot.BackgroundColor3 = color
+    monUI.max.Text = monitor.maxFps and tostring(round(monitor.maxFps)) or "--"
+    monUI.min.Text = monitor.minFps and tostring(round(monitor.minFps)) or "--"
+    monUI.max.TextColor3 = C.green
+    monUI.min.TextColor3 = C.red
+end
+
+updateGraph = function()
+    local bars = monUI.bars
+    if not bars then return end
+    local history = monitor.history
+    local n = #history
+    local peak = 60
+    for i = 1, n do
+        if history[i] > peak then peak = history[i] end
+    end
+    monUI.peak.Text = tostring(round(peak))
+    for i = 1, HISTORY_SIZE do
+        local bar = bars[i]
+        local value = history[i - (HISTORY_SIZE - n)]
+        if value then
+            bar.Visible = true
+            bar.Size = UDim2.new(1 / HISTORY_SIZE, -1, math.clamp(value / peak, 0.02, 1), 0)
+            bar.BackgroundColor3 = fpsColor(value)
+        else
+            bar.Visible = false
+        end
+    end
+end
+
+-- Notificação (toast). "text" é a chave em inglês; argumentos extras formatam a tradução.
+notify = function(text, color, ...)
+    if not ui.toast or not ui.window.Visible then return end
+    ui.toastToken += 1
+    local token = ui.toastToken
+    local toast = ui.toast
+    local message = tr(text)
+    if select("#", ...) > 0 then
+        message = string.format(message, ...)
+    end
+    ui.toastLabel.Text = message
+    ui.toastStroke.Color = color or C.cyan
+    toast.Position = UDim2.new(0.5, 0, 1, 40)
+    toast.Visible = true
+    tween(toast, 0.3, {Position = UDim2.new(0.5, 0, 1, -14)}, Enum.EasingStyle.Back)
+    task.delay(2.8, function()
+        if not alive or token ~= ui.toastToken then return end
+        local t = tween(toast, 0.25, {Position = UDim2.new(0.5, 0, 1, 50)})
+        t.Completed:Connect(function()
+            if token == ui.toastToken then toast.Visible = false end
+        end)
+    end)
+end
+
+refreshPositionText = function()
+    if ui.positionButton then
+        ui.positionButton.Text = string.format(tr("Interface Position: %s"), tr(POSITION_NAMES[config.position]))
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- JANELA: posição, layout responsivo, abas, minimizar
+-- ════════════════════════════════════════════════════════════════
+local function positionWindow(index, animate)
+    local viewport = ui.gui.AbsoluteSize
+    local size = ui.window.AbsoluteSize
+    local margin = 12
+    local x = (viewport.X - size.X) / 2
+    local y = (viewport.Y - size.Y) / 2
+    if index == 2 then
+        x, y = margin, margin + 40
+    elseif index == 3 then
+        x, y = viewport.X - size.X - margin, margin + 40
+    elseif index == 4 then
+        x, y = margin, viewport.Y - size.Y - margin
+    elseif index == 5 then
+        x, y = viewport.X - size.X - margin, viewport.Y - size.Y - margin
+    end
+    local pos = clampToScreen(Vector2.new(x, y))
+    local target = UDim2.fromOffset(pos.X, pos.Y)
+    if animate then
+        tween(ui.window, 0.4, {Position = target}, Enum.EasingStyle.Quint)
+    else
+        ui.window.Position = target
+    end
+end
+
+local function tabIndicatorY(tab)
+    local step = ui.tabStep or 46
+    local height = math.min(26, step - 8)
+    return 10 + (tab.index - 1) * step + (step - 6 - height) / 2
+end
+
+-- Ajusta o espaçamento das abas para caberem na barra lateral (8 abas)
+local function layoutTabs()
+    local compact = ui.window.AbsoluteSize.X < 520
+    local sidebarHeight = ui.window.AbsoluteSize.Y - 49
+    local available = sidebarHeight - 16 - (compact and 0 or 40)
+    local step = math.clamp(math.floor(available / (ui.tabCount or 4)), 28, 46)
+    ui.tabStep = step
+    for _, tab in pairs(ui.tabs) do
+        tab.button.Position = UDim2.new(0, 6, 0, 10 + (tab.index - 1) * step)
+        tab.button.Size = UDim2.new(1, -12, 0, step - 6)
+    end
+    ui.tabIndicator.Size = UDim2.fromOffset(3, math.min(26, step - 8))
+    local current = ui.tabs[ui.currentTab]
+    if current then
+        ui.tabIndicator.Position = UDim2.new(0, 0, 0, tabIndicatorY(current))
+    end
+end
+
+local function applyLayoutMode()
+    local compact = ui.window.AbsoluteSize.X < 520
+    local width = compact and 46 or 168
+    ui.sidebar.Size = UDim2.new(0, width, 1, -49)
+    ui.content.Position = UDim2.new(0, width, 0, 49)
+    ui.content.Size = UDim2.new(1, -width, 1, -49)
+    ui.footer.Visible = not compact
+    for _, tab in pairs(ui.tabs) do
+        tab.label.Visible = not compact
+    end
+    layoutTabs()
+end
+
+local function selectTab(id)
+    if ui.currentTab == id then return end
+    local old = ui.pages[ui.currentTab]
+    ui.currentTab = id
+    for tabId, tab in pairs(ui.tabs) do
+        local selected = tabId == id
+        tween(tab.button, 0.2, {BackgroundTransparency = selected and 0.8 or 1})
+        tween(tab.label, 0.2, {TextColor3 = selected and C.text or C.sub})
+        if selected then
+            tween(ui.tabIndicator, 0.3, {Position = UDim2.new(0, 0, 0, tabIndicatorY(tab))}, Enum.EasingStyle.Quint)
+        end
+    end
+    if old then old.Visible = false end
+    local page = ui.pages[id]
+    page.Position = UDim2.new(0, 0, 0, 14)
+    page.Visible = true
+    tween(page, 0.28, {Position = UDim2.new(0, 0, 0, 0)}, Enum.EasingStyle.Quint)
+    if id == "monitor" then
+        updateMonitorUI()
+        updateGraph()
+    end
+    updateStatus()
+end
+
+local function setMinimized(minimized)
+    if minimized then
+        ui.window.Visible = false
+        ui.bubble.Size = UDim2.fromOffset(20, 20)
+        ui.bubble.Visible = true
+        tween(ui.bubble, 0.3, {Size = UDim2.fromOffset(BUBBLE_SIZE, BUBBLE_SIZE)}, Enum.EasingStyle.Back)
+    else
+        ui.bubble.Visible = false
+        local target = ui.window.Position
+        ui.window.Position = target + UDim2.fromOffset(0, 18)
+        ui.window.Visible = true
+        tween(ui.window, 0.3, {Position = target}, Enum.EasingStyle.Quint)
+    end
+end
+
+local function restoreDefaultSettings()
+    for key, value in pairs(DEFAULT_CONFIG) do config[key] = value end
+    for _, id in ipairs({"cfg_showFps", "cfg_showPing", "cfg_rgb"}) do refreshToggle(id) end
+    resetRGBRotation()
+    refreshPositionText()
+    positionWindow(config.position, true)
+    updateHUD()
+    notify("Default settings restored", C.cyan)
+end
+-- ════════════════════════════════════════════════════════════════
+-- LUNA COMMUNITY — RECURSOS (somente cliente)
+-- Dash cooldown, Anti-AFK, Speed (Heartbeat), Auto Candy, Headless,
+-- Korblox, ESP Ultimate, Check Ult e Invisibility.
+-- Tudo começa DESATIVADO; cada toggle executa a função de verdade
+-- e desconecta suas conexões ao ser desligado.
+-- Mobile: o Speed usa um botão RUN na tela (segurar) no lugar da tecla F.
+-- ════════════════════════════════════════════════════════════════
+local function setupLunaModule()
+    local okVirtualUser, VirtualUser = pcall(function()
+        return game:GetService("VirtualUser")
+    end)
+
+    local RGB = Color3.fromRGB
+    local CYAN, PURPLE, PINK, GOLD = RGB(0, 220, 255), RGB(190, 70, 255), RGB(255, 70, 200), RGB(255, 205, 70)
+    local ULT_MAX = 100 -- valor em que a ULT é considerada cheia (ajuste se o seu jogo usar outro máximo)
+
+    local luna = {
+        noDash = false, antiAfk = false, candy = false, speed = false,
+        headless = false, korblox = false, espUlt = false, checkUlt = false, invis = false,
+    }
+    local lunaUI = {}
+
+    local function lunaRefresh(id)
+        if refreshToggle then refreshToggle(id) end
+    end
+
+    local function getHumanoid()
+        local character = LocalPlayer.Character
+        return character and character:FindFirstChildOfClass("Humanoid")
+    end
+
+    local function lunaOutline(obj, color, thickness)
+        return addStroke(obj, color, thickness, 0.12)
+    end
+
+    local function lunaGradientText(label)
+        return create("UIGradient", {Color = RGB_SEQUENCE}, label)
+    end
+
+    -- ════════════════ NO DASH COOLDOWN ════════════════
+    local DASH_ATTRIBUTES = {"VIPServer", "VIPServerOwner", "NoDashCooldown"}
+    local dashBackup = nil
+
+    local function setNoDash(on)
+        on = on and true or false
+        if luna.noDash == on then return end
+        luna.noDash = on
+        if on then
+            dashBackup = {}
+            for _, name in ipairs(DASH_ATTRIBUTES) do
+                dashBackup[name] = Workspace:GetAttribute(name)
+            end
+            Workspace:SetAttribute("VIPServer", tostring(LocalPlayer.UserId))
+            Workspace:SetAttribute("VIPServerOwner", LocalPlayer.Name)
+            Workspace:SetAttribute("NoDashCooldown", true)
+        else
+            if dashBackup then
+                for _, name in ipairs(DASH_ATTRIBUTES) do
+                    Workspace:SetAttribute(name, dashBackup[name])
+                end
+                dashBackup = nil
+            end
+            Workspace:SetAttribute("NoDashCooldown", false)
+        end
+        lunaRefresh("luna_dash")
+    end
+
+    -- ════════════════ ANTI-AFK ════════════════
+    local afkConnection = nil
+
+    local function setAntiAfk(on)
+        on = on and true or false
+        if luna.antiAfk == on then return end
+        luna.antiAfk = on
+        -- Flag para sistemas de AFK dentro do seu próprio jogo
+        LocalPlayer:SetAttribute("LunaAntiAFKEnabled", on)
+        if afkConnection then
+            afkConnection:Disconnect()
+            afkConnection = nil
+        end
+        if on and okVirtualUser then
+            -- Evita o kick de inatividade da plataforma simulando um clique quando o Idled dispara
+            afkConnection = LocalPlayer.Idled:Connect(function()
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new())
+                end)
+            end)
+        end
+        lunaRefresh("luna_afk")
+    end
+
+    -- ════════════════ SPEED BY HEARTBEAT ════════════════
+    local speed = {
+        multiplier = 1.8, min = 1.1, max = 5.0, step = 0.1,
+        held = false, original = nil, humanoid = nil,
+        tracks = {}, conns = {}, animConn = nil,
+    }
+
+    local function updateSpeedStatus()
+        -- Botão RUN (mobile): visível somente com o Speed ligado em dispositivos touch
+        if lunaUI.runButton then
+            lunaUI.runButton.Visible = (luna.speed and IS_TOUCH) and true or false
+        end
+        if not lunaUI.speedStatus then return end
+        local key
+        if not luna.speed then
+            key = IS_TOUCH and "STATUS: OFF  •  HOLD RUN BUTTON" or "STATUS: OFF  •  HOLD F TO RUN"
+        elseif speed.held then
+            key = IS_TOUCH and "STATUS: RUNNING  •  RELEASE BUTTON" or "STATUS: RUNNING  •  RELEASE F TO STOP"
+        else
+            key = IS_TOUCH and "STATUS: ON  •  HOLD RUN BUTTON" or "STATUS: ON  •  HOLD F TO RUN"
+        end
+        setDyn(lunaUI.speedStatus, key)
+    end
+
+    local function updateSpeedValue()
+        if lunaUI.speedValue then
+            lunaUI.speedValue.Text = string.format("%.1fx", speed.multiplier)
+        end
+    end
+
+    local function restoreSpeed()
+        local humanoid = speed.humanoid or getHumanoid()
+        if humanoid and humanoid.Parent and speed.original then
+            humanoid.WalkSpeed = speed.original
+        end
+        speed.original = nil
+    end
+
+    -- Segurar / soltar o modo corrida (tecla F no PC, botão RUN no mobile)
+    local function setHeld(value)
+        if not luna.speed then return end
+        speed.held = value and true or false
+        if not speed.held then restoreSpeed() end
+        updateSpeedStatus()
+    end
+
+    -- Mantém a animação de andar/correr em 1x enquanto a velocidade real muda
+    local function keepLocomotionNormal(animTrack)
+        local trackName = string.lower(animTrack.Name or "")
+        if trackName:find("walk", 1, true) or trackName:find("run", 1, true) then
+            speed.tracks[animTrack] = true
+            animTrack:AdjustSpeed(1)
+        end
+    end
+
+    local function bindSpeedCharacter(character)
+        if speed.animConn then
+            speed.animConn:Disconnect()
+            speed.animConn = nil
+        end
+        speed.original = nil
+        speed.held = false
+        table.clear(speed.tracks)
+        updateSpeedStatus()
+        local humanoid = character:WaitForChild("Humanoid", 10)
+        if not humanoid or not luna.speed then return end
+        speed.humanoid = humanoid
+        local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid:WaitForChild("Animator", 5)
+        if animator and luna.speed then
+            for _, animTrack in ipairs(animator:GetPlayingAnimationTracks()) do
+                keepLocomotionNormal(animTrack)
+            end
+            speed.animConn = animator.AnimationPlayed:Connect(keepLocomotionNormal)
+        end
+    end
+
+    local function speedStep()
+        local humanoid = getHumanoid()
+        if not humanoid or humanoid.Health <= 0 then return end
+        speed.humanoid = humanoid
+        if speed.held then
+            if not speed.original then
+                speed.original = humanoid.WalkSpeed
+            end
+            humanoid.WalkSpeed = speed.original * speed.multiplier
+        elseif speed.original then
+            restoreSpeed()
+        end
+        for animTrack in pairs(speed.tracks) do
+            if animTrack.IsPlaying then
+                animTrack:AdjustSpeed(1)
+            else
+                speed.tracks[animTrack] = nil
+            end
+        end
+    end
+
+    local function setSpeed(on)
+        on = on and true or false
+        if luna.speed == on then return end
+        luna.speed = on
+        if on then
+            local character = LocalPlayer.Character
+            if character then task.spawn(bindSpeedCharacter, character) end
+            speed.conns[#speed.conns + 1] = LocalPlayer.CharacterAdded:Connect(bindSpeedCharacter)
+            speed.conns[#speed.conns + 1] = UserInputService.InputBegan:Connect(function(input, processed)
+                if processed or UserInputService:GetFocusedTextBox() then return end
+                if input.KeyCode == Enum.KeyCode.F then
+                    setHeld(true)
+                end
+            end)
+            speed.conns[#speed.conns + 1] = UserInputService.InputEnded:Connect(function(input)
+                if input.KeyCode == Enum.KeyCode.F then
+                    setHeld(false)
+                end
+            end)
+            speed.conns[#speed.conns + 1] = RunService.Heartbeat:Connect(speedStep)
+        else
+            for i = #speed.conns, 1, -1 do
+                speed.conns[i]:Disconnect()
+                speed.conns[i] = nil
+            end
+            if speed.animConn then
+                speed.animConn:Disconnect()
+                speed.animConn = nil
+            end
+            speed.held = false
+            restoreSpeed()
+            table.clear(speed.tracks)
+        end
+        lunaRefresh("luna_speed")
+        updateSpeedStatus()
+    end
+
+    local function changeSpeedMultiplier(direction)
+        local value = speed.multiplier + direction * speed.step
+        value = math.floor(value * 10 + 0.5) / 10
+        speed.multiplier = math.clamp(value, speed.min, speed.max)
+        updateSpeedValue()
+    end
+
+    -- Botão RUN flutuante para mobile (segurar para correr). Fica fora da janela,
+    -- então continua disponível mesmo com a GUI minimizada.
+    local function createRunButton()
+        if lunaUI.runButton then return end
+        local button = create("TextButton", {
+            Name = "MobileRunButton",
+            AnchorPoint = Vector2.new(1, 1),
+            Position = UDim2.new(1, -30, 1, -190),
+            Size = UDim2.fromOffset(74, 74),
+            BackgroundColor3 = C.bg,
+            BackgroundTransparency = 0.15,
+            AutoButtonColor = false,
+            Font = Enum.Font.GothamBlack,
+            Text = "RUN",
+            TextSize = 16,
+            TextColor3 = C.text,
+            Visible = false,
+            ZIndex = 30,
+        }, ui.gui)
+        addCircle(button)
+        addRGBGradient(addStroke(button, Color3.new(1, 1, 1), 2.5, 0), 60)
+        track(button.InputBegan:Connect(function(input)
+            local inputType = input.UserInputType
+            if inputType ~= Enum.UserInputType.Touch and inputType ~= Enum.UserInputType.MouseButton1 then
+                return
+            end
+            setHeld(true)
+            local releaseConn
+            releaseConn = input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    releaseConn:Disconnect()
+                    setHeld(false)
+                end
+            end)
+        end))
+        lunaUI.runButton = button
+    end
+
+    -- ════════════════ AUTO CANDY ════════════════
+    local candy = {token = 0, statusKey = "STATUS: OFF", drawing = nil}
+
+    local function candyDrawingRefresh()
+        local drawing = candy.drawing
+        if not drawing then return end
+        pcall(function()
+            local camera = Workspace.CurrentCamera
+            if camera then
+                drawing.Position = Vector2.new(camera.ViewportSize.X / 2, 35)
+            end
+            drawing.Text = "LUNA COMMUNITY | " .. candy.statusKey
+        end)
+    end
+
+    -- Overlay opcional (Drawing só existe em alguns ambientes); criado apenas com o Auto Candy ligado
+    local function candyDrawingCreate()
+        if candy.drawing then return end
+        pcall(function()
+            local text = Drawing.new("Text")
+            text.Size = 18
+            text.Center = true
+            text.Outline = true
+            text.Color = Color3.fromRGB(255, 255, 255)
+            text.Visible = true
+            candy.drawing = text
+        end)
+        candyDrawingRefresh()
+    end
+
+    local function candyDrawingRemove()
+        local drawing = candy.drawing
+        candy.drawing = nil
+        if drawing then
+            pcall(function() drawing:Remove() end)
+        end
+    end
+
+    local function setCandyStatus(key)
+        candy.statusKey = key
+        if lunaUI.candyStatus then
+            setDyn(lunaUI.candyStatus, key)
+        end
+        candyDrawingRefresh()
+    end
+
+    local function candyActive(token)
+        return luna.candy and candy.token == token and alive
+    end
+
+    local function getCandyPosition(candyItem)
+        local restAttribute = candyItem:GetAttribute("Rest")
+        if typeof(restAttribute) == "Vector3" then
+            return restAttribute
+        elseif typeof(restAttribute) == "CFrame" then
+            return restAttribute.Position
+        end
+
+        local restObject = candyItem:FindFirstChild("Rest")
+        if restObject then
+            if restObject:IsA("ObjectValue") and restObject.Value and restObject.Value:IsA("BasePart") then
+                return restObject.Value.Position
+            elseif restObject:IsA("BasePart") then
+                return restObject.Position
+            elseif restObject:IsA("Vector3Value") then
+                return restObject.Value
+            end
+        end
+        return nil
+    end
+
+    local function findClosestCandy(root, folder)
+        local closestPosition, closestDistance
+        for _, candyItem in ipairs(folder:GetChildren()) do
+            local position = getCandyPosition(candyItem)
+            if position then
+                local distance = (root.Position - position).Magnitude
+                if not closestDistance or distance < closestDistance then
+                    closestDistance = distance
+                    closestPosition = position
+                end
+            end
+        end
+        return closestPosition
+    end
+
+    local function findClosestCandyDoor(root, trees)
+        local bestPrompt, bestPart, bestDistance
+        for _, tree in ipairs(trees:GetChildren()) do
+            local door = tree:FindFirstChild("DOOR 1 NEW")
+            local frame = door and door:FindFirstChild("Frame")
+            local prompt = frame and frame:FindFirstChild("TrickOrTreat")
+            local part = prompt and prompt.Parent
+            if prompt and prompt:IsA("ProximityPrompt") and part and part:IsA("BasePart") then
+                local distance = (root.Position - part.Position).Magnitude
+                if not bestDistance or distance < bestDistance then
+                    bestPrompt, bestPart, bestDistance = prompt, part, distance
+                end
+            end
+        end
+        return bestPrompt, bestPart
+    end
+
+    local function activateCandyDoor(prompt, part, root, token)
+        if not prompt or not part or not root then
+            return false
+        end
+
+        -- Espera um pouco o prompt da porta ficar disponível
+        local waitStarted = os.clock()
+        while candyActive(token) and prompt.Parent and not prompt.Enabled and os.clock() - waitStarted < 3 do
+            task.wait(0.1)
+        end
+
+        if not candyActive(token) or not prompt.Parent or not part.Parent or not prompt.Enabled then
+            return false
+        end
+
+        -- Fica dentro do alcance do prompt, de frente para a porta
+        local approachDistance = math.clamp(prompt.MaxActivationDistance - 1, 2, 5)
+        local approachPosition = part.Position + part.CFrame.LookVector * approachDistance + Vector3.new(0, 0.5, 0)
+        root.CFrame = CFrame.lookAt(approachPosition, part.Position)
+        task.wait(0.25)
+
+        if not candyActive(token) or not prompt.Parent or not prompt.Enabled then
+            return false
+        end
+
+        local distance = (root.Position - part.Position).Magnitude
+        if distance > prompt.MaxActivationDistance then
+            return false
+        end
+
+        -- Usa fireproximityprompt quando existir; senão, os métodos de input do ProximityPrompt
+        if type(fireproximityprompt) == "function" then
+            local ok = pcall(function()
+                fireproximityprompt(prompt)
+            end)
+            return ok
+        end
+
+        local ok = pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(math.max(prompt.HoldDuration, 0.1) + 0.15)
+            prompt:InputHoldEnd()
+        end)
+        return ok
+    end
+
+    local setCandy
+
+    local function runAutoCandy(token)
+        local candyFolder = Workspace:WaitForChild("HalloweenCandy", 10)
+        local doorTrees = Workspace:WaitForChild("HalloweenDoorTrees", 10)
+        if not candyActive(token) then return end
+        if not candyFolder or not doorTrees then
+            setCandy(false)
+            setCandyStatus("STATUS: REQUIRED FOLDERS NOT FOUND")
+            return
+        end
+
+        while candyActive(token) do
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+
+            if not humanoid or not root or humanoid.Health <= 0 then
+                setCandyStatus("STATUS: WAITING FOR CHARACTER")
+                task.wait(0.5)
+                continue
+            end
+
+            if character:FindFirstChild("RootAnchor") or character:FindFirstChild("NoRotate") then
+                setCandyStatus("STATUS: WAITING FOR DOOR")
+                task.wait(0.25)
+                continue
+            end
+
+            local candyPosition = findClosestCandy(root, candyFolder)
+            if candyPosition then
+                setCandyStatus("STATUS: COLLECTING CANDY")
+                root.CFrame = CFrame.new(candyPosition + Vector3.new(0, 4, 0))
+                humanoid.Jump = true
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            else
+                local prompt, part = findClosestCandyDoor(root, doorTrees)
+                if prompt and part then
+                    setCandyStatus("STATUS: OPENING NEAREST DOOR")
+                    local opened = activateCandyDoor(prompt, part, root, token)
+                    if not candyActive(token) then return end
+                    if opened then
+                        setCandyStatus("STATUS: DOOR INTERACTION COMPLETE")
+                    else
+                        setCandyStatus("STATUS: DOOR NOT READY - RETRYING")
+                    end
+                    task.wait(0.5)
+                else
+                    setCandyStatus("STATUS: NO CANDY OR DOORS FOUND")
+                    task.wait(0.5)
+                end
+            end
+            task.wait(0.15)
+        end
+    end
+
+    setCandy = function(on)
+        on = on and true or false
+        if luna.candy == on then return end
+        luna.candy = on
+        candy.token += 1 -- invalida qualquer loop anterior (garante um único loop ativo)
+        if on then
+            setCandyStatus("STATUS: STARTING...")
+            candyDrawingCreate()
+            task.spawn(runAutoCandy, candy.token)
+        else
+            setCandyStatus("STATUS: OFF")
+            candyDrawingRemove()
+        end
+        lunaRefresh("luna_candy")
+    end
+
+    -- ════════════════ HEADLESS & KORBLOX (cosmético local) ════════════════
+    local KORBLOX_MESH, KORBLOX_TEX = "101851696", "101851254"
+    local HEAD_MESH, HEAD_TEX = "134082579", "134082627"
+    local cosmeticState = setmetatable({}, {__mode = "k"})
+    local cosmeticConns = {}
+
+    local function getCosmeticState(character)
+        local cState = cosmeticState[character]
+        if not cState then
+            cState = {headChildren = {}, accessories = {}}
+            cosmeticState[character] = cState
+        end
+        return cState
+    end
+
+    local function applyHeadless(character)
+        local head = character and character:FindFirstChild("Head")
+        if not head then return end
+        local cState = getCosmeticState(character)
+
+        if not cState.headProps then
+            cState.headProps = {
+                Transparency = head.Transparency,
+                BrickColor = head.BrickColor,
+                Material = head.Material,
+            }
+        end
+
+        for _, child in ipairs(head:GetChildren()) do
+            if (child:IsA("Decal") or child:IsA("SpecialMesh")) and child.Name ~= "LunaHeadlessMesh" then
+                table.insert(cState.headChildren, child)
+                child.Parent = nil
+            end
+        end
+
+        local mesh = head:FindFirstChild("LunaHeadlessMesh")
+        if not mesh then
+            mesh = Instance.new("SpecialMesh")
+            mesh.Name = "LunaHeadlessMesh"
+            mesh.MeshType = Enum.MeshType.FileMesh
+            mesh.MeshId = "rbxassetid://" .. HEAD_MESH
+            mesh.TextureId = "rbxassetid://" .. HEAD_TEX
+            mesh.Scale = Vector3.new(1.25, 1.25, 1.25)
+            mesh.Offset = Vector3.new(0, 0, 0)
+            mesh.Parent = head
+        end
+        head.Transparency = 0.1
+        head.BrickColor = BrickColor.new("Really black")
+        head.Material = Enum.Material.Plastic
+
+        for _, item in ipairs(character:GetChildren()) do
+            if item:IsA("Accessory") then
+                local handle = item:FindFirstChild("Handle")
+                local attachment = handle and handle:FindFirstChildOfClass("Attachment")
+                if attachment then
+                    local n = attachment.Name:lower()
+                    if n:find("hair") or n:find("hat") or n:find("face") then
+                        table.insert(cState.accessories, item)
+                        item.Parent = nil
+                    end
+                end
+            end
+        end
+    end
+
+    local function restoreHeadless(character)
+        local cState = cosmeticState[character]
+        if not cState then return end
+        local head = character:FindFirstChild("Head")
+        if head then
+            local mesh = head:FindFirstChild("LunaHeadlessMesh")
+            if mesh then mesh:Destroy() end
+            if cState.headProps then
+                head.Transparency = cState.headProps.Transparency
+                head.BrickColor = cState.headProps.BrickColor
+                head.Material = cState.headProps.Material
+            end
+            for _, child in ipairs(cState.headChildren) do
+                child.Parent = head
+            end
+        end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        for _, accessory in ipairs(cState.accessories) do
+            if not accessory.Parent then
+                local ok = humanoid and pcall(function() humanoid:AddAccessory(accessory) end)
+                if not ok then accessory.Parent = character end
+            end
+        end
+        table.clear(cState.headChildren)
+        table.clear(cState.accessories)
+        cState.headProps = nil
+    end
+
+    local function applyKorblox(character)
+        local leg = character and (character:FindFirstChild("Right Leg") or character:FindFirstChild("RightLowerLeg"))
+        if not leg then return end
+        local cState = getCosmeticState(character)
+        if cState.legTransparency == nil then
+            cState.legTransparency = leg.Transparency
+        end
+
+        if character:FindFirstChild("FakeKorbloxLeg") then
+            leg.Transparency = 1
+            return
+        end
+
+        local fake = Instance.new("Part")
+        fake.Name = "FakeKorbloxLeg"
+        fake.Size = leg.Size
+        fake.CFrame = leg.CFrame
+        fake.Anchored = false
+        fake.CanCollide = false
+        fake.Massless = true
+        fake.Transparency = 0
+        fake.BrickColor = BrickColor.new("Really black")
+        fake.Material = Enum.Material.Plastic
+
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.FileMesh
+        mesh.MeshId = "rbxassetid://" .. KORBLOX_MESH
+        mesh.TextureId = "rbxassetid://" .. KORBLOX_TEX
+        mesh.Scale = Vector3.new(1, 1, 1)
+        mesh.Offset = Vector3.new(0, 0, 0)
+        mesh.Parent = fake
+        fake.Parent = character
+
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = leg
+        weld.Part1 = fake
+        weld.Parent = fake
+
+        leg.Transparency = 1
+        fake.CFrame = leg.CFrame
+    end
+
+    local function restoreKorblox(character)
+        local fake = character:FindFirstChild("FakeKorbloxLeg")
+        if fake then fake:Destroy() end
+        local leg = character:FindFirstChild("Right Leg") or character:FindFirstChild("RightLowerLeg")
+        local cState = cosmeticState[character]
+        if leg and cState and cState.legTransparency ~= nil then
+            leg.Transparency = cState.legTransparency
+        end
+        if cState then cState.legTransparency = nil end
+    end
+
+    local function applyCosmetics(character)
+        if not character or not character.Parent then return end
+        if luna.headless then pcall(applyHeadless, character) end
+        if luna.korblox then pcall(applyKorblox, character) end
+    end
+
+    -- Reaplica após morrer / renascer (conexões existem só enquanto algum cosmético estiver ligado)
+    local function ensureCosmeticConns()
+        if #cosmeticConns > 0 then return end
+        cosmeticConns[1] = LocalPlayer.CharacterAdded:Connect(function(character)
+            character:WaitForChild("Humanoid", 10)
+            character:WaitForChild("Head", 10)
+            task.wait(0.5)
+            applyCosmetics(character)
+        end)
+        cosmeticConns[2] = LocalPlayer.CharacterAppearanceLoaded:Connect(function(character)
+            task.wait(0.1)
+            applyCosmetics(character)
+        end)
+    end
+
+    local function dropCosmeticConnsIfIdle()
+        if luna.headless or luna.korblox then return end
+        for i = #cosmeticConns, 1, -1 do
+            cosmeticConns[i]:Disconnect()
+            cosmeticConns[i] = nil
+        end
+    end
+
+    local function setHeadless(on)
+        on = on and true or false
+        if luna.headless == on then return end
+        luna.headless = on
+        local character = LocalPlayer.Character
+        if on then
+            ensureCosmeticConns()
+            if character then pcall(applyHeadless, character) end
+        else
+            if character then pcall(restoreHeadless, character) end
+            dropCosmeticConnsIfIdle()
+        end
+        lunaRefresh("luna_headless")
+    end
+
+    local function setKorblox(on)
+        on = on and true or false
+        if luna.korblox == on then return end
+        luna.korblox = on
+        local character = LocalPlayer.Character
+        if on then
+            ensureCosmeticConns()
+            if character then pcall(applyKorblox, character) end
+        else
+            if character then pcall(restoreKorblox, character) end
+            dropCosmeticConnsIfIdle()
+        end
+        lunaRefresh("luna_korblox")
+    end
+
+    -- ════════════════ ESP ULTIMATE ════════════════
+    local espData, charConns, espMaster = {}, {}, {}
+    local espLoopId = 0
+
+    local function destroyUltEsp(target)
+        local data = espData[target]
+        if not data then return end
+        espData[target] = nil
+        for _, connection in ipairs(data.conns) do connection:Disconnect() end
+        if data.gui then data.gui:Destroy() end
+    end
+
+    local function refreshInfo(data)
+        local target = data.player
+        local ping = math.floor(tonumber(target:GetAttribute("Ping")) or 0)
+        local platform = target:GetAttribute("Mobile") and "MOBILE" or "PC"
+        local live = Workspace:FindFirstChild("Live")
+        local entry = live and live:FindFirstChild(target.Name)
+        local streak = entry and tonumber(entry:GetAttribute("CurrentStreak")) or 0
+        data.info.Text = string.format("%s  •  %dms  •  🔥 %d", platform, ping, streak)
+    end
+
+    local normalFill = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, CYAN),
+        ColorSequenceKeypoint.new(0.55, PURPLE),
+        ColorSequenceKeypoint.new(1, PINK),
+    })
+    local readyFill = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, RGB(255, 170, 40)),
+        ColorSequenceKeypoint.new(1, RGB(255, 240, 120)),
+    })
+
+    local function updateUlt(data)
+        local value = tonumber(data.player:GetAttribute("Ultimate"))
+        local percent = value and math.clamp(value / ULT_MAX, 0, 1) or 0
+        local ready = value ~= nil and value >= ULT_MAX
+        TweenService:Create(data.fill, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(percent, 0, 1, 0),
+        }):Play()
+        data.fillGradient.Color = ready and readyFill or normalFill
+        data.stroke.Color = ready and GOLD or CYAN
+        data.value.TextColor3 = ready and GOLD or RGB(235, 240, 255)
+        if value == nil then
+            data.value.Text = tr("ULT: N/A")
+        elseif ready then
+            data.value.Text = tr("ULT READY")
+        else
+            data.value.Text = "ULT: " .. tostring(math.floor(value))
+        end
+    end
+
+    local function createUltEsp(target, character)
+        if target == LocalPlayer or not luna.espUlt then return end
+        local head = character:FindFirstChild("Head") or character:WaitForChild("Head", 5)
+        if not head or not luna.espUlt or not character.Parent then return end
+
+        destroyUltEsp(target)
+
+        local billboard = create("BillboardGui", {
+            Name = "LunaUltEsp",
+            Size = UDim2.fromOffset(176, 58),
+            StudsOffset = Vector3.new(0, 3.6, 0),
+            AlwaysOnTop = true,
+            MaxDistance = 1500,
+            Adornee = head,
+        }, head)
+
+        local box = create("Frame", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = RGB(10, 13, 28),
+            BackgroundTransparency = 0.12,
+            BorderSizePixel = 0,
+        }, billboard)
+        addCorner(box, 10)
+        local stroke = lunaOutline(box, CYAN, 1.6)
+        create("UIGradient", {
+            Color = ColorSequence.new(Color3.new(1, 1, 1), RGB(175, 180, 205)),
+            Rotation = 90,
+        }, box)
+
+        local nameLabel = create("TextLabel", {
+            Size = UDim2.new(0.55, -6, 0, 16), Position = UDim2.fromOffset(8, 4),
+            BackgroundTransparency = 1, Text = target.Name,
+            TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+        }, box)
+        lunaGradientText(nameLabel)
+
+        local valueLabel = create("TextLabel", {
+            Size = UDim2.new(0.45, -8, 0, 16), Position = UDim2.new(0.55, 0, 0, 4),
+            BackgroundTransparency = 1, Text = tr("ULT: N/A"),
+            TextColor3 = RGB(235, 240, 255), Font = Enum.Font.GothamBold, TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Right,
+        }, box)
+
+        local infoLabel = create("TextLabel", {
+            Size = UDim2.new(1, -16, 0, 13), Position = UDim2.fromOffset(8, 21),
+            BackgroundTransparency = 1, Text = "",
+            TextColor3 = RGB(140, 155, 185), Font = Enum.Font.Gotham, TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, box)
+
+        local barTrack = create("Frame", {
+            Size = UDim2.new(1, -16, 0, 10), Position = UDim2.fromOffset(8, 39),
+            BackgroundColor3 = RGB(28, 34, 60), BorderSizePixel = 0,
+        }, box)
+        addCorner(barTrack, 5)
+        create("UIStroke", {Color = RGB(75, 110, 200), Thickness = 1, Transparency = 0.6}, barTrack)
+
+        local fill = create("Frame", {
+            Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+        }, barTrack)
+        addCorner(fill, 5)
+        local fillGradient = create("UIGradient", {Color = normalFill}, fill)
+
+        local data = {
+            player = target, gui = billboard, fill = fill, fillGradient = fillGradient,
+            value = valueLabel, info = infoLabel, stroke = stroke, conns = {},
+        }
+        espData[target] = data
+
+        table.insert(data.conns, target:GetAttributeChangedSignal("Ultimate"):Connect(function()
+            updateUlt(data)
+        end))
+        table.insert(data.conns, billboard.AncestryChanged:Connect(function(_, parent)
+            if not parent and espData[target] == data then
+                destroyUltEsp(target)
+            end
+        end))
+
+        updateUlt(data)
+        refreshInfo(data)
+    end
+
+    local function watchPlayer(target)
+        if target == LocalPlayer then return end
+        if charConns[target] then charConns[target]:Disconnect() end
+        charConns[target] = target.CharacterAdded:Connect(function(character)
+            task.spawn(createUltEsp, target, character)
+        end)
+        if target.Character then
+            task.spawn(createUltEsp, target, target.Character)
+        end
+    end
+
+    local function setEspUlt(on)
+        on = on and true or false
+        if luna.espUlt == on then return end
+        luna.espUlt = on
+        espLoopId += 1
+        if on then
+            local id = espLoopId
+            for _, other in ipairs(Players:GetPlayers()) do
+                watchPlayer(other)
+            end
+            table.insert(espMaster, Players.PlayerAdded:Connect(watchPlayer))
+            table.insert(espMaster, Players.PlayerRemoving:Connect(function(other)
+                destroyUltEsp(other)
+                if charConns[other] then
+                    charConns[other]:Disconnect()
+                    charConns[other] = nil
+                end
+            end))
+            task.spawn(function()
+                while luna.espUlt and espLoopId == id do
+                    for _, data in pairs(espData) do
+                        refreshInfo(data)
+                    end
+                    task.wait(1)
+                end
+            end)
+        else
+            for _, connection in ipairs(espMaster) do connection:Disconnect() end
+            table.clear(espMaster)
+            for other, connection in pairs(charConns) do
+                connection:Disconnect()
+                charConns[other] = nil
+            end
+            for other in pairs(espData) do
+                destroyUltEsp(other)
+            end
+        end
+        lunaRefresh("luna_esp")
+    end
+
+    -- ════════════════ CHECK ULT (DEATH COUNTER) ════════════════
+    local checkData = {}
+    local checkLoopId = 0
+
+    local function removeCheck(target)
+        local data = checkData[target]
+        if not data then return end
+        checkData[target] = nil
+        if data.tween then data.tween:Cancel() end
+        if data.gui then data.gui:Destroy() end
+    end
+
+    local function buildCheck(target, head)
+        local billboard = create("BillboardGui", {
+            Name = "LunaCheckUlt",
+            Size = UDim2.fromOffset(150, 46),
+            StudsOffset = Vector3.new(0, -2.8, 0),
+            AlwaysOnTop = true,
+            MaxDistance = 1500,
+            Adornee = head,
+        }, head)
+
+        local box = create("Frame", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = RGB(30, 8, 16),
+            BackgroundTransparency = 0.1,
+            BorderSizePixel = 0,
+        }, billboard)
+        addCorner(box, 10)
+        local stroke = lunaOutline(box, RGB(255, 50, 80), 1.8)
+        create("UIGradient", {
+            Color = ColorSequence.new(Color3.new(1, 1, 1), RGB(190, 165, 175)),
+            Rotation = 90,
+        }, box)
+
+        create("TextLabel", {
+            Size = UDim2.new(0, 36, 1, 0), Position = UDim2.fromOffset(4, 0),
+            BackgroundTransparency = 1, Text = "💀", TextSize = 24, Font = Enum.Font.GothamBold,
+            TextColor3 = Color3.new(1, 1, 1),
+        }, box)
+
+        create("TextLabel", {
+            Size = UDim2.new(1, -46, 0, 16), Position = UDim2.fromOffset(40, 7),
+            BackgroundTransparency = 1, Text = "DEATH COUNTER",
+            TextColor3 = RGB(255, 90, 110), Font = Enum.Font.GothamBold, TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, box)
+
+        create("TextLabel", {
+            Size = UDim2.new(1, -46, 0, 14), Position = UDim2.fromOffset(40, 24),
+            BackgroundTransparency = 1, Text = target.Name .. "  •  " .. tr("ULT ACTIVE"),
+            TextColor3 = RGB(170, 150, 165), Font = Enum.Font.Gotham, TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+        }, box)
+
+        local pulse = TweenService:Create(stroke, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+            Transparency = 0.75,
+        })
+        pulse:Play()
+        return billboard, pulse
+    end
+
+    local function scanCheck()
+        for _, target in ipairs(Players:GetPlayers()) do
+            if target ~= LocalPlayer then
+                local character = target.Character
+                local head = character and character:FindFirstChild("Head")
+                if head and character:FindFirstChild("Counter") then
+                    local data = checkData[target]
+                    if not data or not data.gui.Parent then
+                        removeCheck(target)
+                        local billboard, pulse = buildCheck(target, head)
+                        checkData[target] = {gui = billboard, tween = pulse}
+                    end
+                else
+                    removeCheck(target)
+                end
+            end
+        end
+        for target in pairs(checkData) do
+            if not target.Parent then
+                removeCheck(target)
+            end
+        end
+    end
+
+    local function setCheckUlt(on)
+        on = on and true or false
+        if luna.checkUlt == on then return end
+        luna.checkUlt = on
+        checkLoopId += 1
+        if on then
+            local id = checkLoopId
+            task.spawn(function()
+                while luna.checkUlt and checkLoopId == id do
+                    pcall(scanCheck)
+                    task.wait(0.5)
+                end
+            end)
+        else
+            for target in pairs(checkData) do
+                removeCheck(target)
+            end
+        end
+        lunaRefresh("luna_check")
+    end
+
+    -- ════════════════ INVISIBILITY ════════════════
+    local INVIS_ANIMATION_ID = "rbxassetid://136370737633649"
+    local INVIS_TIME_POSITION = 4.56
+    local INVIS_SPEED = 0
+    local INVIS_BODY = {"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
+    local invisTrack = nil
+    local invisSaved = {}
+    local invisRespawn = nil
+
+    local function fadeBody(character)
+        if not character then return end
+        for _, name in ipairs(INVIS_BODY) do
+            local part = character:FindFirstChild(name)
+            if part and part:IsA("BasePart") and part.Transparency < 1 then
+                if invisSaved[part] == nil then
+                    invisSaved[part] = part.Transparency
+                end
+                part.Transparency = 0.5
+            end
+        end
+    end
+
+    local function unfadeBody()
+        for part, original in pairs(invisSaved) do
+            if part.Parent and part.Transparency == 0.5 then
+                part.Transparency = original
+            end
+        end
+        table.clear(invisSaved)
+    end
+
+    local function playInvis(character)
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local animator = humanoid and (humanoid:FindFirstChildOfClass("Animator") or humanoid:WaitForChild("Animator", 3))
+        if not animator then return end
+        if invisTrack and invisTrack.IsPlaying then return end
+
+        local animation = Instance.new("Animation")
+        animation.AnimationId = INVIS_ANIMATION_ID
+        local ok, loaded = pcall(function()
+            return animator:LoadAnimation(animation)
+        end)
+        if not ok or not loaded then return end
+        invisTrack = loaded
+        loaded:Play()
+        loaded.TimePosition = INVIS_TIME_POSITION
+        loaded:AdjustSpeed(INVIS_SPEED)
+    end
+
+    local function stopInvis()
+        if invisTrack then
+            pcall(function() invisTrack:Stop() end)
+            invisTrack = nil
+        end
+    end
+
+    local function applyInvis(character)
+        if not character or not luna.invis then return end
+        fadeBody(character)
+        playInvis(character)
+    end
+
+    local function setInvis(on)
+        on = on and true or false
+        if luna.invis == on then return end
+        luna.invis = on
+        if on then
+            task.spawn(applyInvis, LocalPlayer.Character)
+            -- Reaplica após morrer / renascer
+            invisRespawn = LocalPlayer.CharacterAdded:Connect(function(character)
+                stopInvis()
+                table.clear(invisSaved)
+                if not luna.invis then return end
+                character:WaitForChild("Humanoid", 10)
+                task.wait(0.6)
+                if character.Parent then
+                    applyInvis(character)
+                end
+            end)
+        else
+            if invisRespawn then
+                invisRespawn:Disconnect()
+                invisRespawn = nil
+            end
+            stopInvis()
+            unfadeBody()
+        end
+        lunaRefresh("luna_invis")
+    end
+
+    -- Desliga tudo da aba Luna Community (usado no botão de emergência e no desligamento)
+    lunaDisableAll = function()
+        local setters = {setNoDash, setAntiAfk, setCandy, setSpeed, setHeadless, setKorblox, setEspUlt, setCheckUlt, setInvis}
+        for _, setter in ipairs(setters) do
+            pcall(setter, false)
+        end
+    end
+
+    -- ════════════════ INTERFACE DA ABA ════════════════
+    local function createSpeedRow(page)
+        local row = create("Frame", {
+            Name = "luna_speedRow",
+            Size = UDim2.new(1, 0, 0, 56),
+            BackgroundColor3 = C.row,
+            BackgroundTransparency = 0.05,
+            LayoutOrder = nextOrder(page),
+        }, page)
+        addCorner(row, 10)
+        addStroke(row, C.stroke, 1, 0.2)
+
+        create("TextLabel", {
+            Position = UDim2.fromOffset(14, 9),
+            Size = UDim2.new(1, -150, 0, 18),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            Text = "Speed Multiplier",
+            TextSize = 14,
+            TextColor3 = C.text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, row)
+        create("TextLabel", {
+            Position = UDim2.fromOffset(14, 29),
+            Size = UDim2.new(1, -150, 0, 16),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.Gotham,
+            Text = "Adjust from 1.1x to 5.0x",
+            TextSize = 11,
+            TextColor3 = C.sub,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, row)
+
+        local function stepButton(text, offset, direction)
+            local button = create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -offset, 0.5, 0),
+                Size = UDim2.fromOffset(30, 30),
+                BackgroundColor3 = C.rowHover,
+                AutoButtonColor = false,
+                Font = Enum.Font.GothamBold,
+                Text = text,
+                TextSize = 18,
+                TextColor3 = C.cyan,
+            }, row)
+            addCorner(button, 8)
+            local stroke = addStroke(button, C.cyan, 1.5, 0.4)
+            track(button.MouseEnter:Connect(function()
+                tween(stroke, 0.15, {Transparency = 0})
+            end))
+            track(button.MouseLeave:Connect(function()
+                tween(stroke, 0.15, {Transparency = 0.4})
+            end))
+            track(button.Activated:Connect(function()
+                changeSpeedMultiplier(direction)
+            end))
+        end
+
+        stepButton("+", 14, 1)
+        lunaUI.speedValue = create("TextLabel", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -50, 0.5, 0),
+            Size = UDim2.fromOffset(52, 30),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            Text = "1.8x",
+            TextSize = 14,
+            TextColor3 = C.text,
+        }, row)
+        stepButton("−", 106, -1)
+    end
+
+    buildLunaPage = function(page)
+        createRunButton()
+
+        createSection(page, "PERFORMANCE")
+        createFeatureToggle(page, "lunaBoost", "FPS Boost", "Reduces textures, effects and visual details", C.yellow)
+        createToggle(page, "luna_dash", "No Dash Cooldown", "Sets the local NoDashCooldown flag (game must read it)",
+            function() return luna.noDash end, setNoDash)
+        createToggle(page, "luna_afk", "Anti-AFK", "Blocks the idle kick and keeps your AFK flag off",
+            function() return luna.antiAfk end, setAntiAfk)
+
+        createSection(page, "MOVEMENT")
+        createToggle(page, "luna_speed", "Speed by Heartbeat", "Hold F (PC) or RUN (mobile) to run faster. Legs stay at 1x.",
+            function() return luna.speed end, setSpeed)
+        createSpeedRow(page)
+        lunaUI.speedStatus = createInfoCard(page, 34)
+        updateSpeedStatus()
+        updateSpeedValue()
+
+        createSection(page, "AUTOMATION")
+        createToggle(page, "luna_candy", "Auto Candy", "Collects candy and opens Halloween doors",
+            function() return luna.candy end, setCandy)
+        lunaUI.candyStatus = createInfoCard(page, 34)
+        setCandyStatus(candy.statusKey)
+
+        createSection(page, "COSMETICS")
+        createToggle(page, "luna_headless", "Headless", "Fake headless head. Reapplies after you die.",
+            function() return luna.headless end, setHeadless)
+        createToggle(page, "luna_korblox", "Korblox", "Fake Korblox right leg. Reapplies after you die.",
+            function() return luna.korblox end, setKorblox)
+
+        createSection(page, "PLAYERS")
+        createToggle(page, "luna_esp", "ESP Ultimate", "Ult bar, ping, platform and streak above players",
+            function() return luna.espUlt end, setEspUlt)
+        createToggle(page, "luna_check", "Check Ult", "Marks players using Death Counter above their body",
+            function() return luna.checkUlt end, setCheckUlt)
+        createToggle(page, "luna_invis", "Invisibility", "Frozen pose + body fade. Works well with Auto Candy.",
+            function() return luna.invis end, setInvis)
+    end
+end
+setupLunaModule()
+-- ════════════════════════════════════════════════════════════════
+-- CUSTOM UI — 20 temas, cores neon, 64 modos RGB, luz em movimento,
+-- brilho neon e decorações. O padrão (Original + RGB Padrão) é
+-- exatamente o visual original do script.
+-- ════════════════════════════════════════════════════════════════
+local function setupCustomModule()
+    local HSV, RGB = Color3.fromHSV, Color3.fromRGB
+    local sin, floor, exp, min, max = math.sin, math.floor, math.exp, math.min, math.max
+
+    local custom = {
+        theme = "original", source = "default", preset = "cyan", modeIndex = 1,
+        light = false, lightStyle = "white", glow = false, decor = false,
+    }
+    local custHue = 0
+    local cuUI = {}
+    local themeGrid, neonGrid, modeGrid, lightGrid
+    local choiceRefreshers = {}
+    local rnd = Random.new()
+
+    -- ── Cores neon fixas ──────────────────────────────────────────
+    local PRESET_ORDER = {"cyan", "purple", "pink", "green", "red", "orange", "blue", "gold", "aqua", "lime", "silver",
+        "kitty", "violet", "mint", "blood"}
+    local PRESET_NAMES = {
+        cyan = "Cyan", purple = "Purple", pink = "Pink", green = "Green", red = "Red", orange = "Orange",
+        blue = "Blue", gold = "Gold", aqua = "Aqua", lime = "Lime", silver = "Silver",
+        kitty = "Kitty", violet = "Violet", mint = "Mint", blood = "Blood",
+    }
+    local PRESETS = {
+        cyan = {RGB(0, 220, 255), RGB(90, 245, 255)},
+        purple = {RGB(190, 80, 255), RGB(110, 75, 255)},
+        pink = {RGB(255, 50, 190), RGB(255, 130, 220)},
+        green = {RGB(50, 255, 120), RGB(140, 255, 180)},
+        red = {RGB(255, 60, 70), RGB(255, 130, 100)},
+        orange = {RGB(255, 125, 35), RGB(255, 205, 75)},
+        blue = {RGB(0, 140, 255), RGB(80, 190, 255)},
+        gold = {RGB(255, 200, 60), RGB(255, 235, 140)},
+        aqua = {RGB(45, 210, 235), RGB(90, 150, 255)},
+        lime = {RGB(180, 255, 60), RGB(120, 230, 40)},
+        silver = {RGB(235, 240, 255), RGB(150, 160, 190)},
+        kitty = {RGB(255, 105, 180), RGB(255, 182, 213)},
+        violet = {RGB(150, 90, 255), RGB(205, 155, 255)},
+        mint = {RGB(110, 255, 200), RGB(185, 255, 232)},
+        blood = {RGB(205, 15, 35), RGB(255, 80, 80)},
+    }
+    local PRESET_SEQ = {}
+    for id, colors in pairs(PRESETS) do
+        PRESET_SEQ[id] = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, colors[1]),
+            ColorSequenceKeypoint.new(0.5, colors[2]),
+            ColorSequenceKeypoint.new(1, colors[1]),
+        })
+    end
+
+    -- ── Temas (paleta + cor neon padrão + decoração) ──────────────
+    -- palette: bg, panel, row, rowHover, stroke, graph
+    -- kind: "emoji" (set de emojis/símbolos), "bubble" ou "star"
+    local function mk(bg, panel, row, rowHover, stroke, graph)
+        return {bg = bg, panel = panel, row = row, rowHover = rowHover, stroke = stroke, graph = graph}
+    end
+
+    local THEME_ORDER = {
+        "original", "halloween", "water", "hellokitty", "neoncity", "cyberpunk", "matrix", "sakura",
+        "lava", "forest", "christmas", "ice", "gold", "vaporwave", "galaxy", "candy",
+        "blood", "toxic", "sunset", "amethyst",
+    }
+    local THEMES = {
+        original = {
+            name = "Original", kind = "star",
+            palette = {
+                bg = C.bg, panel = C.panel, row = C.row, rowHover = C.rowHover, stroke = C.stroke,
+                graph = RGB(8, 8, 14),
+            },
+        },
+        halloween = {
+            name = "Halloween", preset = "orange", kind = "emoji",
+            set = {"🦇", "🦇", "🎃", "👻", "🍬", "🦇"}, corner = "🎃",
+            palette = mk(RGB(24, 11, 18), RGB(34, 15, 22), RGB(43, 25, 29), RGB(66, 36, 38), RGB(110, 62, 45), RGB(18, 8, 12)),
+        },
+        water = {
+            name = "Water", preset = "aqua", kind = "bubble",
+            palette = mk(RGB(5, 19, 31), RGB(8, 28, 44), RGB(14, 39, 54), RGB(22, 60, 82), RGB(40, 100, 125), RGB(4, 14, 24)),
+        },
+        hellokitty = {
+            name = "Hello Kitty", preset = "kitty", kind = "emoji",
+            set = {"🎀", "🐱", "🌸", "💖", "🍓", "⭐"}, corner = "🎀",
+            palette = mk(RGB(44, 16, 34), RGB(60, 22, 46), RGB(82, 34, 64), RGB(116, 50, 92), RGB(176, 84, 138), RGB(34, 12, 26)),
+        },
+        neoncity = {
+            name = "Neon City", preset = "pink", kind = "star",
+            palette = mk(RGB(3, 3, 6), RGB(7, 7, 13), RGB(15, 15, 24), RGB(26, 26, 40), RGB(0, 120, 145), RGB(2, 2, 4)),
+        },
+        cyberpunk = {
+            name = "Cyberpunk", preset = "gold", kind = "emoji",
+            set = {"⚡", "🤖", "💾", "🌐", "⚡"},
+            palette = mk(RGB(13, 13, 10), RGB(23, 21, 12), RGB(35, 33, 17), RGB(57, 53, 23), RGB(122, 112, 40), RGB(9, 9, 6)),
+        },
+        matrix = {
+            name = "Matrix", preset = "green", kind = "emoji", motion = "fall", count = 18,
+            set = {"0", "1", "1", "0", "1"}, color = RGB(60, 255, 110),
+            palette = mk(RGB(3, 13, 6), RGB(5, 21, 10), RGB(10, 33, 16), RGB(16, 53, 26), RGB(30, 112, 56), RGB(2, 9, 4)),
+        },
+        sakura = {
+            name = "Sakura", preset = "pink", kind = "emoji", motion = "fall",
+            set = {"🌸", "🌸", "🌺", "🍃"},
+            palette = mk(RGB(29, 16, 29), RGB(41, 23, 41), RGB(57, 33, 55), RGB(83, 49, 81), RGB(141, 91, 141), RGB(22, 11, 22)),
+        },
+        lava = {
+            name = "Lava", preset = "red", kind = "emoji",
+            set = {"🔥", "🌋", "💥", "🔥"},
+            palette = mk(RGB(23, 7, 5), RGB(35, 11, 7), RGB(49, 17, 11), RGB(75, 27, 15), RGB(131, 51, 26), RGB(16, 4, 3)),
+        },
+        forest = {
+            name = "Forest", preset = "lime", kind = "emoji",
+            set = {"🌲", "🍃", "🍄", "🦋", "🌿"},
+            palette = mk(RGB(7, 19, 11), RGB(10, 29, 16), RGB(17, 41, 23), RGB(27, 63, 35), RGB(51, 111, 61), RGB(4, 13, 7)),
+        },
+        christmas = {
+            name = "Christmas", preset = "red", kind = "emoji", motion = "fall",
+            set = {"❄️", "🎄", "🎁", "⭐", "❄️"}, corner = "🎄",
+            palette = mk(RGB(25, 9, 13), RGB(35, 13, 17), RGB(45, 21, 23), RGB(67, 31, 33), RGB(121, 51, 51), RGB(18, 6, 9)),
+        },
+        ice = {
+            name = "Ice", preset = "blue", kind = "emoji", motion = "fall",
+            set = {"❄️", "❄️", "💎", "❄️"},
+            palette = mk(RGB(10, 21, 35), RGB(14, 31, 51), RGB(23, 45, 71), RGB(37, 69, 105), RGB(91, 141, 191), RGB(7, 15, 27)),
+        },
+        gold = {
+            name = "Luxury Gold", preset = "gold", kind = "emoji",
+            set = {"👑", "✨", "💎", "🪙", "✨"},
+            palette = mk(RGB(15, 12, 5), RGB(25, 19, 7), RGB(37, 29, 11), RGB(59, 47, 17), RGB(121, 96, 36), RGB(10, 8, 3)),
+        },
+        vaporwave = {
+            name = "Vaporwave", preset = "pink", kind = "emoji",
+            set = {"🌴", "🌅", "💿", "🐬", "🌴"},
+            palette = mk(RGB(21, 9, 37), RGB(31, 13, 55), RGB(45, 21, 75), RGB(69, 33, 109), RGB(131, 71, 191), RGB(14, 6, 26)),
+        },
+        galaxy = {
+            name = "Galaxy", preset = "violet", kind = "emoji",
+            set = {"🌙", "⭐", "✨", "🌠", "⭐"},
+            palette = mk(RGB(7, 5, 23), RGB(11, 9, 35), RGB(19, 15, 55), RGB(31, 25, 87), RGB(81, 61, 171), RGB(4, 3, 15)),
+        },
+        candy = {
+            name = "Candy", preset = "mint", kind = "emoji",
+            set = {"🍭", "🍬", "🍩", "🧁", "🍭"},
+            palette = mk(RGB(31, 15, 41), RGB(45, 21, 59), RGB(63, 31, 81), RGB(91, 45, 117), RGB(161, 101, 201), RGB(23, 10, 31)),
+        },
+        blood = {
+            name = "Blood", preset = "blood", kind = "emoji",
+            set = {"🩸", "🦇", "💀", "🩸"},
+            palette = mk(RGB(15, 3, 5), RGB(25, 5, 9), RGB(39, 9, 13), RGB(61, 13, 19), RGB(111, 21, 29), RGB(10, 2, 3)),
+        },
+        toxic = {
+            name = "Toxic", preset = "lime", kind = "emoji",
+            set = {"🧪", "💀", "🐸", "🧪"},
+            palette = mk(RGB(9, 15, 5), RGB(14, 23, 7), RGB(23, 35, 11), RGB(37, 57, 17), RGB(87, 121, 33), RGB(6, 10, 3)),
+        },
+        sunset = {
+            name = "Sunset", preset = "orange", kind = "emoji",
+            set = {"🌅", "☁️", "🌴", "🌅"},
+            palette = mk(RGB(29, 13, 15), RGB(45, 19, 21), RGB(63, 29, 27), RGB(93, 43, 37), RGB(151, 81, 61), RGB(21, 9, 10)),
+        },
+        amethyst = {
+            name = "Amethyst", preset = "violet", kind = "star",
+            palette = mk(RGB(15, 9, 25), RGB(23, 13, 39), RGB(35, 21, 59), RGB(55, 33, 93), RGB(111, 71, 171), RGB(10, 6, 17)),
+        },
+    }
+    for _, id in ipairs(THEME_ORDER) do
+        local theme = THEMES[id]
+        theme.accent = theme.preset and PRESETS[theme.preset][1] or C.cyan
+    end
+    local currentPalette = THEMES.original.palette
+    local PALETTE_KEYS = {"bg", "panel", "row", "rowHover", "stroke", "graph"}
+
+    -- Recolore todos os elementos que usam as cores da paleta atual
+    local function applyPalette(name)
+        local theme = THEMES[name]
+        local new = theme and theme.palette
+        local old = currentPalette
+        if not new or new == old then return end
+        local swaps = {}
+        for _, key in ipairs(PALETTE_KEYS) do
+            swaps[#swaps + 1] = {old[key], new[key]}
+        end
+        local function remap(color)
+            for i = 1, #swaps do
+                if color == swaps[i][1] then return swaps[i][2] end
+            end
+            return nil
+        end
+        for _, inst in ipairs(ui.gui:GetDescendants()) do
+            if inst:IsA("GuiObject") then
+                local mapped = remap(inst.BackgroundColor3)
+                if mapped then inst.BackgroundColor3 = mapped end
+            elseif inst:IsA("UIStroke") then
+                local mapped = remap(inst.Color)
+                if mapped then inst.Color = mapped end
+            end
+        end
+        for _, key in ipairs({"bg", "panel", "row", "rowHover", "stroke"}) do
+            C[key] = new[key]
+        end
+        currentPalette = new
+    end
+
+    -- ── 64 modos RGB ──────────────────────────────────────────────
+    local rgbModes = {}
+
+    local function pal(list, p)
+        local n = #list
+        p = (p % 1) * n
+        local i = floor(p)
+        return list[i % n + 1]:Lerp(list[(i + 1) % n + 1], p - i)
+    end
+
+    local function addMode(name, fn)
+        rgbModes[#rgbModes + 1] = {name = name, fn = fn}
+    end
+
+    local function addPalette(name, speed, ...)
+        local list = {...}
+        addMode(name, function(t) return pal(list, t * speed) end)
+    end
+
+    local function addPulse(name, color, speed)
+        addMode(name, function(t)
+            local k = 0.62 + 0.38 * sin(t * speed)
+            return Color3.new(color.R * k, color.G * k, color.B * k)
+        end)
+    end
+
+    -- Baseados em matiz (17)
+    addMode("RAINBOW", function(t, h) return HSV(h, 0.8, 1) end)
+    addMode("FAST RAINBOW", function(t) return HSV((t * 0.5) % 1, 0.85, 1) end)
+    addMode("SLOW RAINBOW", function(t) return HSV((t * 0.035) % 1, 0.8, 1) end)
+    addMode("REVERSE", function(t, h) return HSV(1 - h, 0.8, 1) end)
+    addMode("PASTEL", function(t, h) return HSV(h, 0.35, 1) end)
+    addMode("VIVID", function(t, h) return HSV(h, 1, 1) end)
+    addMode("DEEP", function(t, h) return HSV(h, 1, 0.8) end)
+    addMode("PRISM", function(t, h) return HSV(h, 0.7, 1):Lerp(RGB(255, 255, 255), 0.25 + 0.2 * sin(t * 2)) end)
+    addMode("PLASMA", function(t) return HSV((0.75 + 0.15 * sin(t * 1.3) + 0.1 * sin(t * 2.1)) % 1, 0.9, 1) end)
+    addMode("OCEAN SWING", function(t) return HSV(0.5 + 0.2 * (0.5 + 0.5 * sin(t)), 0.9, 1) end)
+    addMode("COLD FUSION", function(t) return HSV(0.5 + 0.12 * sin(t * 0.8), 0.8, 1) end)
+    addMode("WARM SWING", function(t) return HSV(0.02 + 0.1 * (0.5 + 0.5 * sin(t * 0.9)), 0.95, 1) end)
+    addMode("VIOLET WAVE", function(t) return HSV(0.72 + 0.1 * sin(t * 1.1), 0.8, 1) end)
+    addMode("GREEN WAVE", function(t) return HSV(0.33 + 0.07 * sin(t * 1.2), 0.85, 1) end)
+    addMode("DISCO", function(t) return HSV(floor(t * 4) % 12 / 12, 0.9, 1) end)
+    addMode("GLITCH", function(t) return HSV(floor(t * 10) * 0.137 % 1, 1, 1) end)
+    do
+        local steps = {RGB(255, 40, 60), RGB(40, 255, 90), RGB(50, 110, 255)}
+        addMode("STEP RGB", function(t) return steps[floor(t * 1.5) % 3 + 1] end)
+    end
+
+    -- Paletas (36)
+    addPalette("FIRE", 0.30, RGB(255, 40, 0), RGB(255, 140, 0), RGB(255, 220, 40))
+    addPalette("ICE", 0.25, RGB(120, 220, 255), RGB(255, 255, 255), RGB(60, 150, 255))
+    addPalette("FOREST", 0.22, RGB(20, 120, 50), RGB(80, 200, 90), RGB(10, 80, 40))
+    addPalette("SUNSET", 0.20, RGB(255, 94, 98), RGB(255, 153, 102), RGB(255, 195, 113), RGB(190, 70, 160))
+    addPalette("AURORA", 0.20, RGB(0, 255, 160), RGB(0, 190, 255), RGB(150, 70, 255))
+    addPalette("OCEAN", 0.22, RGB(0, 60, 160), RGB(0, 180, 220), RGB(120, 240, 255))
+    addPalette("LAVA", 0.28, RGB(120, 10, 0), RGB(255, 60, 0), RGB(255, 170, 0))
+    addPalette("TOXIC", 0.30, RGB(120, 255, 0), RGB(30, 200, 60), RGB(220, 255, 60))
+    addPalette("GALAXY", 0.18, RGB(20, 10, 80), RGB(110, 40, 200), RGB(0, 140, 255), RGB(220, 80, 255))
+    addPalette("CANDY", 0.25, RGB(255, 105, 180), RGB(120, 220, 255), RGB(255, 240, 120))
+    addPalette("SAKURA", 0.20, RGB(255, 183, 213), RGB(255, 255, 255), RGB(255, 120, 170))
+    addPalette("MATRIX", 0.30, RGB(0, 60, 10), RGB(0, 255, 70), RGB(150, 255, 170))
+    addPalette("CYBERPUNK", 0.25, RGB(255, 0, 140), RGB(0, 240, 255), RGB(255, 235, 0))
+    addPalette("VAPORWAVE", 0.22, RGB(255, 113, 206), RGB(1, 205, 254), RGB(185, 103, 255), RGB(5, 255, 161))
+    addPalette("SYNTHWAVE", 0.22, RGB(255, 40, 160), RGB(120, 40, 255), RGB(0, 200, 255))
+    addPalette("MIAMI", 0.25, RGB(255, 70, 130), RGB(0, 230, 220), RGB(255, 160, 90))
+    addPalette("GOLD", 0.25, RGB(255, 200, 40), RGB(255, 240, 140), RGB(190, 130, 10))
+    addPalette("SILVER", 0.25, RGB(210, 215, 230), RGB(255, 255, 255), RGB(130, 140, 165))
+    addPalette("EMERALD", 0.22, RGB(0, 150, 90), RGB(40, 240, 150), RGB(0, 100, 70))
+    addPalette("SAPPHIRE", 0.22, RGB(15, 50, 200), RGB(70, 130, 255), RGB(10, 30, 130))
+    addPalette("AMETHYST", 0.22, RGB(140, 60, 220), RGB(200, 130, 255), RGB(90, 30, 160))
+    addPalette("RUBY", 0.22, RGB(180, 0, 40), RGB(255, 60, 90), RGB(110, 0, 25))
+    addPalette("POLICE", 0.60, RGB(255, 0, 40), RGB(0, 60, 255))
+    addPalette("CHRISTMAS", 0.30, RGB(230, 20, 40), RGB(20, 170, 60), RGB(255, 255, 255))
+    addPalette("HALLOWEEN", 0.28, RGB(255, 120, 0), RGB(140, 50, 220), RGB(80, 255, 70))
+    addPalette("TROPICAL", 0.25, RGB(0, 220, 180), RGB(255, 200, 40), RGB(255, 90, 120))
+    addPalette("MINT", 0.22, RGB(150, 255, 210), RGB(255, 255, 255), RGB(90, 230, 190))
+    addPalette("PEACH", 0.22, RGB(255, 190, 150), RGB(255, 140, 130), RGB(255, 225, 190))
+    addPalette("LAVENDER", 0.22, RGB(200, 170, 255), RGB(255, 200, 255), RGB(150, 130, 230))
+    addPalette("COTTON CANDY", 0.25, RGB(255, 190, 230), RGB(180, 225, 255), RGB(255, 255, 255))
+    addPalette("NEBULA", 0.20, RGB(80, 30, 160), RGB(255, 60, 170), RGB(40, 120, 255))
+    addPalette("TWILIGHT", 0.20, RGB(255, 140, 80), RGB(180, 70, 160), RGB(40, 50, 140))
+    addPalette("DESERT", 0.20, RGB(240, 190, 110), RGB(210, 120, 60), RGB(255, 230, 170))
+    addPalette("EVANGELION", 0.25, RGB(130, 40, 200), RGB(60, 220, 60), RGB(255, 120, 0))
+    addPalette("MOLTEN", 0.28, RGB(255, 230, 100), RGB(255, 110, 0), RGB(190, 30, 0))
+    addPalette("MIDNIGHT", 0.18, RGB(10, 20, 70), RGB(60, 90, 220), RGB(150, 170, 255))
+
+    -- Pulsos / especiais (11)
+    addPulse("NEON PINK", RGB(255, 40, 170), 2.2)
+    addPulse("NEON CYAN", RGB(0, 240, 255), 2.2)
+    addPulse("NEON GREEN", RGB(40, 255, 110), 2.2)
+    addPulse("NEON PURPLE", RGB(170, 70, 255), 2.2)
+    addPulse("NEON BLUE", RGB(50, 110, 255), 2.2)
+    addPulse("NEON ORANGE", RGB(255, 130, 20), 2.2)
+    addPulse("NEON RED", RGB(255, 35, 50), 2.2)
+    addPulse("NEON YELLOW", RGB(255, 235, 40), 2.2)
+    addMode("HEARTBEAT", function(t)
+        local p = (t * 1.1) % 1
+        local k = exp(-((p - 0.1) * 16) ^ 2) + 0.7 * exp(-((p - 0.32) * 16) ^ 2)
+        return RGB(90, 0, 15):Lerp(RGB(255, 40, 70), min(k, 1))
+    end)
+    addMode("THUNDER", function(t)
+        local flash = max(0, sin(t * 7) * sin(t * 3.1) - 0.55) * 2.2
+        return RGB(60, 80, 230):Lerp(RGB(255, 255, 255), min(flash, 1))
+    end)
+    addMode("BREATHE", function(t)
+        return RGB(120, 120, 150):Lerp(RGB(255, 255, 255), 0.5 + 0.5 * sin(t * 1.6))
+    end)
+
+    -- ── Fonte de cor dos gradientes RGB ───────────────────────────
+    local function setGradientSequence(seq)
+        currentSequence = seq
+        for _, entry in ipairs(rgbGradients) do
+            if entry.gradient.Parent then
+                entry.gradient.Color = seq
+            end
+        end
+    end
+
+    local function modeSequence()
+        local fn = rgbModes[custom.modeIndex].fn
+        local now = os.clock()
+        return ColorSequence.new({
+            ColorSequenceKeypoint.new(0, fn(now, custHue)),
+            ColorSequenceKeypoint.new(0.25, fn(now + 0.4, (custHue + 0.08) % 1)),
+            ColorSequenceKeypoint.new(0.5, fn(now + 0.8, (custHue + 0.16) % 1)),
+            ColorSequenceKeypoint.new(0.75, fn(now + 1.2, (custHue + 0.24) % 1)),
+            ColorSequenceKeypoint.new(1, fn(now + 1.6, (custHue + 0.32) % 1)),
+        })
+    end
+
+    local function applySource()
+        local seq
+        if custom.source == "mode" then
+            seq = modeSequence()
+        elseif custom.source == "preset" then
+            seq = PRESET_SEQ[custom.preset]
+        else
+            seq = RGB_SEQUENCE
+        end
+        setGradientSequence(seq)
+    end
+
+    -- Cor representativa atual (brilho neon)
+    local function accentColor()
+        if custom.source == "mode" then
+            return rgbModes[custom.modeIndex].fn(os.clock(), custHue)
+        elseif custom.source == "preset" then
+            return PRESETS[custom.preset][1]
+        end
+        return C.cyan:Lerp(C.purple, 0.5 + 0.5 * sin(os.clock() * 1.5))
+    end
+
+    local function refreshModeLabel()
+        local label = cuUI.modeLabel
+        if not label then return end
+        if custom.source == "mode" then
+            dynTexts[label] = nil
+            label.Text = string.format("%02d/%d  %s", custom.modeIndex, #rgbModes, rgbModes[custom.modeIndex].name)
+        else
+            setDyn(label, "DEFAULT NEON")
+        end
+    end
+
+    local function refreshSelections()
+        if themeGrid then themeGrid.setSelected(custom.theme) end
+        if neonGrid then
+            local id = nil
+            if custom.source == "default" then
+                id = "default"
+            elseif custom.source == "preset" then
+                id = custom.preset
+            end
+            neonGrid.setSelected(id)
+        end
+        if modeGrid then modeGrid.setSelected(custom.source == "mode" and custom.modeIndex or nil) end
+        if lightGrid then lightGrid.setSelected(custom.lightStyle) end
+        refreshModeLabel()
+    end
+
+    -- ── Decorações (emojis do tema, bolhas, estrelas) ─────────────
+    local decorParts = {}
+
+    local function clearDecor()
+        if ui.decor then ui.decor:ClearAllChildren() end
+        table.clear(decorParts)
+    end
+
+    local function buildDecor()
+        clearDecor()
+        if not custom.decor or not ui.decor then return end
+        local theme = THEMES[custom.theme]
+        if theme.kind == "emoji" then
+            local fall = theme.motion == "fall"
+            for i = 1, theme.count or 14 do
+                local glyph = theme.set[(i - 1) % #theme.set + 1]
+                local bat = glyph == "🦇"
+                local label = create("TextLabel", {
+                    BackgroundTransparency = 1, Text = glyph,
+                    TextSize = rnd:NextInteger(14, 26),
+                    TextColor3 = theme.color or Color3.new(1, 1, 1),
+                    Font = theme.color and Enum.Font.Code or Enum.Font.Gotham,
+                    Size = UDim2.fromOffset(30, 30),
+                    TextTransparency = 0.35, ZIndex = 0,
+                }, ui.decor)
+                local rate = rnd:NextNumber(0.02, 0.05)
+                decorParts[#decorParts + 1] = {
+                    o = label, kind = bat and "bat" or "float",
+                    x = rnd:NextNumber(0, 1), y = rnd:NextNumber(0, 1),
+                    vx = bat and rnd:NextNumber(0.04, 0.1) * (i % 2 == 0 and 1 or -1) or rnd:NextNumber(-0.015, 0.015),
+                    vy = bat and 0 or (fall and rate or -rate),
+                    ph = rnd:NextNumber(0, 6.28),
+                }
+            end
+            if theme.corner then
+                create("TextLabel", {
+                    BackgroundTransparency = 1, Text = theme.corner, TextSize = 44,
+                    Size = UDim2.fromOffset(50, 50), Position = UDim2.new(0, 4, 1, -54),
+                    TextTransparency = 0.6, ZIndex = 0,
+                }, ui.decor)
+                create("TextLabel", {
+                    BackgroundTransparency = 1, Text = theme.corner, TextSize = 44,
+                    Size = UDim2.fromOffset(50, 50), Position = UDim2.new(1, -54, 1, -54),
+                    TextTransparency = 0.6, ZIndex = 0,
+                }, ui.decor)
+            end
+        elseif theme.kind == "bubble" then
+            for _ = 1, 16 do
+                local size = rnd:NextInteger(6, 18)
+                local bubble = create("Frame", {
+                    Size = UDim2.fromOffset(size, size),
+                    BackgroundColor3 = RGB(120, 230, 255),
+                    BackgroundTransparency = 0.85, BorderSizePixel = 0, ZIndex = 0,
+                }, ui.decor)
+                addCircle(bubble)
+                create("UIStroke", {Color = RGB(170, 240, 255), Thickness = 1, Transparency = 0.45}, bubble)
+                decorParts[#decorParts + 1] = {
+                    o = bubble, kind = "bubble",
+                    x = rnd:NextNumber(0, 1), y = rnd:NextNumber(0, 1),
+                    vx = 0, vy = -rnd:NextNumber(0.03, 0.08), ph = rnd:NextNumber(0, 6.28),
+                }
+            end
+        else
+            for i = 1, 16 do
+                local label = create("TextLabel", {
+                    BackgroundTransparency = 1, Text = "✦",
+                    TextSize = rnd:NextInteger(8, 15),
+                    TextColor3 = (i % 2 == 0) and RGB(90, 225, 255) or RGB(185, 120, 255),
+                    Size = UDim2.fromOffset(20, 20), ZIndex = 0,
+                }, ui.decor)
+                decorParts[#decorParts + 1] = {
+                    o = label, kind = "star",
+                    x = rnd:NextNumber(0, 1), y = rnd:NextNumber(0, 1),
+                    vx = rnd:NextNumber(-0.01, 0.01), vy = -rnd:NextNumber(0.01, 0.025),
+                    ph = rnd:NextNumber(0, 6.28),
+                }
+            end
+        end
+    end
+
+    local function updateDecor(step, t)
+        for _, q in ipairs(decorParts) do
+            q.x += q.vx * step
+            q.y += q.vy * step
+            if q.x > 1.05 then q.x = -0.05 elseif q.x < -0.05 then q.x = 1.05 end
+            if q.y < -0.08 then q.y = 1.08 elseif q.y > 1.08 then q.y = -0.08 end
+            local offX, offY = 0, 0
+            if q.kind == "bat" then
+                offY = sin(t * 3 + q.ph) * 14
+            elseif q.kind == "bubble" or q.kind == "float" then
+                offX = sin(t + q.ph) * 6
+            elseif q.kind == "star" then
+                q.o.TextTransparency = 0.45 + 0.4 * sin(t * 2 + q.ph)
+            end
+            q.o.Position = UDim2.new(q.x, offX, q.y, offY)
+        end
+    end
+
+    local function setDecor(on)
+        custom.decor = on and true or false
+        buildDecor()
+        refreshToggle("cu_decor")
+    end
+
+    -- ── Luz em movimento ──────────────────────────────────────────
+    local LIGHT_COLORS = {
+        white = Color3.new(1, 1, 1),
+        ice = RGB(105, 220, 255),
+        pink = RGB(255, 145, 220),
+    }
+
+    local function applyLightColor()
+        if ui.light then ui.light.BackgroundColor3 = LIGHT_COLORS[custom.lightStyle] or LIGHT_COLORS.white end
+    end
+
+    local function setLight(on)
+        custom.light = on and true or false
+        if ui.lightTween then
+            ui.lightTween:Cancel()
+            ui.lightTween = nil
+        end
+        if ui.light then
+            if custom.light then
+                applyLightColor()
+                ui.light.Position = UDim2.new(0, -120, -0.3, 0)
+                ui.light.Visible = true
+                ui.lightTween = TweenService:Create(
+                    ui.light,
+                    TweenInfo.new(2.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1),
+                    {Position = UDim2.new(1, 120, -0.3, 0)}
+                )
+                ui.lightTween:Play()
+            else
+                ui.light.Visible = false
+            end
+        end
+        refreshToggle("cu_light")
+    end
+
+    -- ── Brilho neon atrás da janela ───────────────────────────────
+    local function setGlow(on)
+        custom.glow = on and true or false
+        if ui.glowTween then
+            ui.glowTween:Cancel()
+            ui.glowTween = nil
+        end
+        if ui.glow then
+            if custom.glow then
+                ui.glow.ImageColor3 = accentColor()
+                ui.glow.ImageTransparency = 0.35
+                ui.glow.Visible = true
+                ui.glowTween = TweenService:Create(
+                    ui.glow,
+                    TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+                    {ImageTransparency = 0.62}
+                )
+                ui.glowTween:Play()
+            else
+                ui.glow.Visible = false
+            end
+        end
+        refreshToggle("cu_glow")
+    end
+
+    -- ── Tema ──────────────────────────────────────────────────────
+    local function setTheme(name)
+        local theme = THEMES[name]
+        if not theme then return end
+        custom.theme = name
+        applyPalette(name)
+        if theme.preset then
+            custom.source, custom.preset = "preset", theme.preset
+        else
+            custom.source = "default"
+        end
+        applySource()
+        setDecor(name ~= "original")
+        for _, refresh in ipairs(choiceRefreshers) do refresh() end
+        refreshSelections()
+    end
+
+    local function restoreDefaultUI()
+        custom.lightStyle = "white"
+        setLight(false)
+        setGlow(false)
+        custom.modeIndex = 1
+        setTheme("original")
+        notify("UI restored to default", C.cyan)
+    end
+
+    -- Chamado pelo Heartbeat principal (~30 Hz, só com a janela visível e animações RGB ligadas)
+    customTick = function(step)
+        custHue = (custHue + step * 0.13) % 1
+        if not ui.window.Visible then return end
+        if custom.source == "mode" then
+            setGradientSequence(modeSequence())
+        end
+        if custom.glow and ui.glow then
+            ui.glow.ImageColor3 = accentColor()
+        end
+        if custom.decor then
+            updateDecor(step, os.clock())
+        end
+    end
+
+    -- ── Grade de botões de escolha ────────────────────────────────
+    local function createChoiceGrid(page, columns, items, onPick, height, textSize)
+        local holder = create("Frame", {
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1,
+            LayoutOrder = nextOrder(page),
+        }, page)
+        local pad = 8
+        create("UIGridLayout", {
+            CellSize = UDim2.new(1 / columns, -math.ceil(pad * (columns - 1) / columns), 0, height or 34),
+            CellPadding = UDim2.fromOffset(pad, pad),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+        }, holder)
+
+        local grid = {holder = holder}
+        local entries = {}
+        local selected = nil
+
+        local function paint(entry, isSelected, hovered)
+            local bg = C.row
+            if isSelected then
+                bg = C.row:Lerp(entry.color, 0.28)
+            elseif hovered then
+                bg = C.row:Lerp(entry.color, 0.14)
+            end
+            tween(entry.button, 0.15, {BackgroundColor3 = bg})
+            tween(entry.stroke, 0.15, {Transparency = isSelected and 0 or 0.45})
+            entry.stroke.Thickness = isSelected and 2 or 1.5
+        end
+
+        grid.setSelected = function(id)
+            selected = id
+            for _, entry in ipairs(entries) do
+                paint(entry, id ~= nil and entry.id == id, false)
+            end
+        end
+
+        for index, item in ipairs(items) do
+            local button = create("TextButton", {
+                LayoutOrder = index,
+                BackgroundColor3 = C.row,
+                AutoButtonColor = false,
+                Font = Enum.Font.GothamBold,
+                Text = item.text,
+                TextSize = textSize or 11,
+                TextColor3 = item.color,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+            }, holder)
+            addCorner(button, 8)
+            local stroke = addStroke(button, item.color, 1.5, 0.45)
+            local entry = {id = item.id, button = button, stroke = stroke, color = item.color}
+            entries[#entries + 1] = entry
+            track(button.MouseEnter:Connect(function()
+                if selected ~= entry.id then paint(entry, false, true) end
+            end))
+            track(button.MouseLeave:Connect(function()
+                if selected ~= entry.id then paint(entry, false, false) end
+            end))
+            track(button.Activated:Connect(function()
+                onPick(item.id)
+            end))
+        end
+
+        choiceRefreshers[#choiceRefreshers + 1] = function()
+            grid.setSelected(selected)
+        end
+        return grid
+    end
+
+    -- ── Página Custom UI ──────────────────────────────────────────
+    buildCustomPage = function(page)
+        createSection(page, "THEME")
+        local themeItems = {}
+        for _, id in ipairs(THEME_ORDER) do
+            themeItems[#themeItems + 1] = {id = id, text = THEMES[id].name, color = THEMES[id].accent}
+        end
+        themeGrid = createChoiceGrid(page, 3, themeItems, function(id)
+            setTheme(id)
+        end)
+
+        createSection(page, "NEON COLOR")
+        local neonItems = {{id = "default", text = "Default RGB", color = C.cyan}}
+        for _, id in ipairs(PRESET_ORDER) do
+            neonItems[#neonItems + 1] = {id = id, text = PRESET_NAMES[id], color = PRESETS[id][1]}
+        end
+        neonGrid = createChoiceGrid(page, 3, neonItems, function(id)
+            if id == "default" then
+                custom.source = "default"
+            else
+                custom.source = "preset"
+                custom.preset = id
+            end
+            applySource()
+            refreshSelections()
+        end)
+
+        createSection(page, "RGB MODES")
+        local modeRow = create("Frame", {
+            Size = UDim2.new(1, 0, 0, 36),
+            BackgroundTransparency = 1,
+            LayoutOrder = nextOrder(page),
+        }, page)
+
+        local function modeButton(text, anchorX, position, size, textSize)
+            local button = create("TextButton", {
+                AnchorPoint = Vector2.new(anchorX, 0),
+                Position = position,
+                Size = size,
+                BackgroundColor3 = C.row,
+                AutoButtonColor = false,
+                Font = Enum.Font.GothamBold,
+                Text = text,
+                TextSize = textSize or 16,
+                TextColor3 = C.cyan,
+            }, modeRow)
+            addCorner(button, 8)
+            local stroke = addStroke(button, C.cyan, 1.5, 0.4)
+            track(button.MouseEnter:Connect(function()
+                tween(stroke, 0.15, {Transparency = 0})
+            end))
+            track(button.MouseLeave:Connect(function()
+                tween(stroke, 0.15, {Transparency = 0.4})
+            end))
+            return button
+        end
+
+        local prevButton = modeButton("◂", 0, UDim2.fromOffset(0, 0), UDim2.fromOffset(36, 36))
+        local listButton = modeButton("ALL MODES", 1, UDim2.new(1, 0, 0, 0), UDim2.fromOffset(110, 36), 10)
+        local nextButton = modeButton("▸", 1, UDim2.new(1, -118, 0, 0), UDim2.fromOffset(36, 36))
+        setDyn(listButton, "ALL MODES")
+
+        cuUI.modeLabel = create("TextLabel", {
+            Position = UDim2.fromOffset(42, 0),
+            Size = UDim2.new(1, -202, 1, 0),
+            BackgroundColor3 = C.row,
+            BackgroundTransparency = 0.05,
+            Font = Enum.Font.GothamBold,
+            Text = "--",
+            TextSize = 11,
+            TextColor3 = C.text,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, modeRow)
+        addCorner(cuUI.modeLabel, 8)
+        addStroke(cuUI.modeLabel, C.stroke, 1, 0.2)
+
+        local modeItems = {}
+        for i, mode in ipairs(rgbModes) do
+            modeItems[i] = {id = i, text = mode.name, color = mode.fn(i * 0.37, (i * 0.0617) % 1)}
+        end
+        modeGrid = createChoiceGrid(page, 3, modeItems, function(index)
+            custom.source = "mode"
+            custom.modeIndex = index
+            applySource()
+            refreshSelections()
+        end, 28, 9)
+        modeGrid.holder.Visible = false
+
+        local function stepMode(direction)
+            local index
+            if custom.source == "mode" then
+                index = (custom.modeIndex - 1 + direction) % #rgbModes + 1
+            else
+                index = direction > 0 and 1 or #rgbModes
+            end
+            custom.source = "mode"
+            custom.modeIndex = index
+            applySource()
+            refreshSelections()
+        end
+        track(prevButton.Activated:Connect(function() stepMode(-1) end))
+        track(nextButton.Activated:Connect(function() stepMode(1) end))
+        track(listButton.Activated:Connect(function()
+            local show = not modeGrid.holder.Visible
+            modeGrid.holder.Visible = show
+            setDyn(listButton, show and "HIDE MODES" or "ALL MODES")
+        end))
+
+        createSection(page, "MOVING LIGHT")
+        createToggle(page, "cu_light", "Moving Light", "A shine band sweeps across the window",
+            function() return custom.light end, setLight)
+        lightGrid = createChoiceGrid(page, 3, {
+            {id = "white", text = "White", color = Color3.new(1, 1, 1)},
+            {id = "ice", text = "Ice Blue", color = RGB(105, 220, 255)},
+            {id = "pink", text = "Pink", color = RGB(255, 145, 220)},
+        }, function(id)
+            custom.lightStyle = id
+            applyLightColor()
+            refreshSelections()
+        end)
+
+        createSection(page, "EFFECTS")
+        createToggle(page, "cu_glow", "Neon Glow", "Pulsing glow behind the window",
+            function() return custom.glow end, setGlow, C.pink)
+        createToggle(page, "cu_decor", "Theme Decorations", "Bats, bubbles or stars floating in the window",
+            function() return custom.decor end, setDecor, C.pink)
+
+        createButton(page, "RESTORE DEFAULT UI", C.cyan, restoreDefaultUI)
+
+        refreshSelections()
+        langHooks[#langHooks + 1] = refreshModeLabel
+    end
+end
+setupCustomModule()
+
+-- ════════════════════════════════════════════════════════════════
+-- OTHERS SCRIPTS — executa scripts externos (loadstring + HttpGet)
+-- Só roda quando o usuário clica em EXECUTE SCRIPT. Precisa de um
+-- executor com suporte a loadstring e game:HttpGet; no Roblox Studio /
+-- jogo normal essas funções não existem e a aba avisa o erro.
+-- ════════════════════════════════════════════════════════════════
+local function runRemoteScript(entry, setBusy)
+    if entry.busy then return end
+    entry.busy = true
+    setBusy(true)
+    task.spawn(function()
+        local function finish()
+            entry.busy = false
+            if alive then setBusy(false) end
+        end
+
+        local okGet, source = pcall(function()
+            return game:HttpGet(entry.url, true)
+        end)
+        if not okGet then
+            notify("This executor does not support loadstring / HttpGet", C.red)
+            finish()
+            return
+        end
+        if type(source) ~= "string" or source == "" then
+            notify("Could not download: %s", C.red, entry.name)
+            finish()
+            return
+        end
+
+        local okLoad, compiled = pcall(function()
+            return loadstring(source)
+        end)
+        if not okLoad or type(compiled) ~= "function" then
+            notify("This executor does not support loadstring / HttpGet", C.red)
+            finish()
+            return
+        end
+
+        notify("Script executed: %s", C.green, entry.name)
+        finish()
+        -- O script roda em thread própria (pode ter loops/yields); erros posteriores são avisados
+        task.spawn(function()
+            local okRun = pcall(compiled)
+            if not okRun then
+                notify("Script failed: %s", C.red, entry.name)
+            end
+        end)
+    end)
+end
+
+local function createScriptRow(page, entry)
+    local row = create("Frame", {
+        Name = "script_" .. entry.id,
+        Size = UDim2.new(1, 0, 0, 56),
+        BackgroundColor3 = C.row,
+        BackgroundTransparency = 0.05,
+        LayoutOrder = nextOrder(page),
+    }, page)
+    addCorner(row, 10)
+    local rowStroke = addStroke(row, C.stroke, 1, 0.2)
+
+    create("TextLabel", {
+        Position = UDim2.fromOffset(14, 9),
+        Size = UDim2.new(1, -146, 0, 18),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = entry.name,
+        TextSize = 14,
+        TextColor3 = C.text,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+    create("TextLabel", {
+        Position = UDim2.fromOffset(14, 29),
+        Size = UDim2.new(1, -146, 0, 16),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = entry.game,
+        TextSize = 11,
+        TextColor3 = C.sub,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    local button = create("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -12, 0.5, 0),
+        Size = UDim2.fromOffset(120, 32),
+        BackgroundColor3 = C.row,
+        AutoButtonColor = false,
+        Font = Enum.Font.GothamBold,
+        Text = "EXECUTE SCRIPT",
+        TextSize = 10,
+        TextColor3 = C.green,
+    }, row)
+    addCorner(button, 8)
+    local stroke = addStroke(button, C.green, 1.5, 0.4)
+    setDyn(button, "EXECUTE SCRIPT")
+
+    track(button.MouseEnter:Connect(function()
+        tween(button, 0.15, {BackgroundColor3 = C.row:Lerp(C.green, 0.18)})
+        tween(stroke, 0.15, {Transparency = 0})
+        tween(rowStroke, 0.15, {Color = C.green})
+    end))
+    track(button.MouseLeave:Connect(function()
+        tween(button, 0.15, {BackgroundColor3 = C.row})
+        tween(stroke, 0.15, {Transparency = 0.4})
+        tween(rowStroke, 0.15, {Color = C.stroke})
+    end))
+    track(button.Activated:Connect(function()
+        runRemoteScript(entry, function(busy)
+            setDyn(button, busy and "LOADING..." or "EXECUTE SCRIPT")
+        end)
+    end))
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- CONSTRUÇÃO DA INTERFACE
+-- ════════════════════════════════════════════════════════════════
+local TAB_DEFS = {
+    {id = "booster", name = "FPS Booster", icon = "⚡"},
+    {id = "monitor", name = "Monitor", icon = "📈"},
+    {id = "advanced", name = "Advanced", icon = "🧠"},
+    {id = "luna", name = "Luna Community", icon = "🌙"},
+    {id = "others", name = "Others Scripts", icon = "📜"},
+    {id = "customui", name = "Custom UI", icon = "🎨"},
+    {id = "settings", name = "Settings", icon = "⚙"},
+    {id = "credits", name = "Credits", icon = "⭐"},
+}
+
+local function buildBoosterPage(page)
+    createSection(page, "STATUS")
+    ui.boosterInfo = createInfoCard(page, 40)
+    createSection(page, "OPTIMIZATIONS")
+    createFeatureToggle(page, "potato", "Potato Mode", "Removes textures, particles, shadows and post effects", C.yellow)
+    createFeatureToggle(page, "trees", "Remove Trees", "Hides trees locally (restorable)")
+    createFeatureToggle(page, "mountains", "Remove Mountains", "Simplifies mountain materials, shadows and meshes")
+    createFeatureToggle(page, "grass", "Remove Grass", "Hides grass and disables terrain decoration")
+    createFeatureToggle(page, "decorations", "Remove Decorations", "Hides decorative objects")
+    createFeatureToggle(page, "textures", "Remove Textures", "Strips decals, textures and part materials")
+    createFeatureToggle(page, "particles", "Remove Particles", "Disables particles, trails, beams, fire and smoke")
+    createFeatureToggle(page, "shadows", "Remove Shadows", "Disables global, part and light shadows")
+    createFeatureToggle(page, "lowgfx", "Low Graphics", "Lowers quality level, water and mesh detail")
+    createFeatureToggle(page, "ultra", "Ultra Performance", "Applies every safe optimization at once", C.pink)
+end
+
+local function buildMonitorPage(page)
+    createSection(page, "REAL-TIME METRICS")
+    local grid = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 202),
+        BackgroundTransparency = 1,
+        LayoutOrder = nextOrder(page),
+    }, page)
+    create("UIGridLayout", {
+        CellSize = UDim2.new(0.5, -4, 0, 62),
+        CellPadding = UDim2.fromOffset(8, 8),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, grid)
+    monUI.fps = createStatCard(grid, "FPS", 1)
+    monUI.ping = createStatCard(grid, "PING", 2)
+    monUI.frame = createStatCard(grid, "RENDER / FRAME TIME", 3)
+    monUI.memory = createStatCard(grid, "CLIENT MEMORY", 4)
+    monUI.perf, monUI.perfDot = createStatCard(grid, "PERFORMANCE", 5, true)
+    monUI.system = createStatCard(grid, "SYSTEM STATE", 6)
+
+    createSection(page, "FPS HISTORY (LAST 30 SECONDS)")
+    local graphCard = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 130),
+        BackgroundColor3 = C.row,
+        BackgroundTransparency = 0.05,
+        LayoutOrder = nextOrder(page),
+    }, page)
+    addCorner(graphCard, 10)
+    addStroke(graphCard, C.stroke, 1, 0.2)
+    local area = create("Frame", {
+        Position = UDim2.fromOffset(10, 10),
+        Size = UDim2.new(1, -20, 1, -20),
+        BackgroundColor3 = Color3.fromRGB(8, 8, 14),
+        ClipsDescendants = true,
+    }, graphCard)
+    addCorner(area, 8)
+    monUI.peak = create("TextLabel", {
+        Position = UDim2.fromOffset(6, 2),
+        Size = UDim2.fromOffset(40, 14),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamMedium,
+        Text = "60",
+        TextSize = 10,
+        TextColor3 = C.sub,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 2,
+    }, area)
+    monUI.bars = {}
+    for i = 1, HISTORY_SIZE do
+        monUI.bars[i] = create("Frame", {
+            AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.fromScale((i - 1) / HISTORY_SIZE, 1),
+            Size = UDim2.new(1 / HISTORY_SIZE, -1, 0, 0),
+            BackgroundColor3 = C.green,
+            BorderSizePixel = 0,
+            Visible = false,
+        }, area)
+    end
+
+    createSection(page, "RECORDS")
+    local records = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 62),
+        BackgroundTransparency = 1,
+        LayoutOrder = nextOrder(page),
+    }, page)
+    create("UIGridLayout", {
+        CellSize = UDim2.new(0.5, -4, 0, 62),
+        CellPadding = UDim2.fromOffset(8, 8),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, records)
+    monUI.max = createStatCard(records, "HIGHEST FPS", 1)
+    monUI.min = createStatCard(records, "LOWEST FPS", 2)
+end
+
+local function buildAdvancedPage(page)
+    createSection(page, "AUTOMATION")
+    createFeatureToggle(page, "autoOpt", "Automatic Optimization", "Escalates optimizations in stages when FPS stays low", C.yellow)
+    createFeatureToggle(page, "smart", "Smart Graphics", "Adapts the graphics quality level to your FPS")
+    createFeatureToggle(page, "dynamic", "Dynamic Performance", "Engages light effects cuts only while FPS is low")
+    createSection(page, "TWEAKS")
+    createFeatureToggle(page, "reduceFX", "Reduce Visual Effects", "Disables bloom, blur, sun rays, DoF and particles")
+    createFeatureToggle(page, "memory", "Memory Optimization", "Lowers mesh detail and flushes internal caches")
+    createSection(page, "LIVE INFO")
+    ui.advInfo = createInfoCard(page, 40)
+    createSection(page, "ACTIONS")
+    createButton(page, "RESTORE DEFAULT GRAPHICS", C.cyan, function()
+        disableAllFeatures()
+        notify("Graphics restored to default", C.cyan)
+    end)
+end
+
+local function buildOthersPage(page)
+    createSection(page, "WARNING")
+    local warning = createInfoCard(page, 64)
+    warning.TextColor3 = C.yellow
+    setDyn(warning, "These scripts are loaded from external links and were not verified by Luna Community. Use at your own risk.")
+
+    createSection(page, "SCRIPTS")
+    for _, entry in ipairs(SCRIPT_LIST) do
+        createScriptRow(page, entry)
+    end
+end
+
+local function buildSettingsPage(page)
+    createSection(page, "DISPLAY")
+    createToggle(page, "cfg_showFps", "Show FPS", "Floating FPS counter on screen",
+        function() return config.showFps end,
+        function(value)
+            config.showFps = value
+            refreshToggle("cfg_showFps")
+            updateHUD()
+        end)
+    createToggle(page, "cfg_showPing", "Show Ping", "Floating ping counter on screen",
+        function() return config.showPing end,
+        function(value)
+            config.showPing = value
+            refreshToggle("cfg_showPing")
+            updateHUD()
+        end)
+    createToggle(page, "cfg_rgb", "RGB Animations", "Animated neon borders and gradients",
+        function() return config.rgb end,
+        function(value)
+            config.rgb = value
+            if not value then resetRGBRotation() end
+            refreshToggle("cfg_rgb")
+        end, C.pink)
+
+    createSection(page, "INTERFACE")
+    ui.positionButton = createButton(page, "Interface Position: " .. POSITION_NAMES[config.position], C.blue, function()
+        config.position = config.position % #POSITION_NAMES + 1
+        refreshPositionText()
+        positionWindow(config.position, true)
+    end)
+    refreshPositionText()
+    createButton(page, "RESTORE DEFAULT SETTINGS", C.cyan, restoreDefaultSettings)
+
+    createSection(page, "EMERGENCY")
+    createButton(page, "EMERGENCY — UNDO ALL CHANGES", C.red, emergencyRestore, 46)
+end
+
+local function buildCreditsPage(page)
+    createSection(page, "CREDITS")
+
+    local made = createInfoCard(page, 48)
+    made.Font = Enum.Font.GothamBlack
+    made.TextSize = 16
+    setDyn(made, "Made by Luna Community")
+
+    local discord = createInfoCard(page, 48)
+    discord.TextColor3 = C.cyan
+    setDyn(discord, "Discord server: https://discord.gg/qa8ZxwT9j")
+
+    local version = createInfoCard(page, 34)
+    version.TextColor3 = C.sub
+    version.Text = "FPS Booster Supremo " .. VERSION
+
+    createSection(page, "ACTIONS")
+    createButton(page, "COPY DISCORD LINK", C.cyan, function()
+        local copy = setclipboard or toclipboard
+        if type(copy) == "function" and pcall(copy, DISCORD_LINK) then
+            notify("Discord link copied", C.green)
+        else
+            notify("Clipboard is not supported here", C.yellow)
+        end
+    end)
+end
+
+local function buildInterface()
+    local existing = PlayerGui:FindFirstChild(GUI_NAME)
+    if existing then existing:Destroy() end
+
+    ui.gui = create("ScreenGui", {
+        Name = GUI_NAME,
+        ResetOnSpawn = false,
+        IgnoreGuiInset = true,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+        DisplayOrder = 1000,
+    }, PlayerGui)
+    ui.toastToken = 0
+    ui.currentTab = nil
+    ui.pages = {}
+    ui.tabs = {}
+    ui.tabCount = #TAB_DEFS
+
+    -- ── Janela principal ──────────────────────────────────────────
+    ui.window = create("Frame", {
+        Name = "Window",
+        Size = UDim2.fromScale(0.9, 0.9),
+        Position = UDim2.fromOffset(0, 0),
+        BackgroundTransparency = 1,
+        Visible = false,
+    }, ui.gui)
+    create("UISizeConstraint", {MaxSize = Vector2.new(700, 450), MinSize = Vector2.new(300, 230)}, ui.window)
+
+    create("ImageLabel", {
+        Name = "Shadow",
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, -20, 0, -14),
+        Size = UDim2.new(1, 40, 1, 40),
+        Image = "rbxassetid://1316045217",
+        ImageColor3 = Color3.new(0, 0, 0),
+        ImageTransparency = 0.5,
+        ScaleType = Enum.ScaleType.Slice,
+        SliceCenter = Rect.new(10, 10, 118, 118),
+    }, ui.window)
+
+    -- Brilho neon (Custom UI) — começa oculto
+    ui.glow = create("ImageLabel", {
+        Name = "NeonGlow",
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(-30, -30),
+        Size = UDim2.new(1, 60, 1, 60),
+        Image = "rbxassetid://5028857084",
+        ImageColor3 = C.cyan,
+        ImageTransparency = 0.45,
+        ScaleType = Enum.ScaleType.Slice,
+        SliceCenter = Rect.new(24, 24, 276, 276),
+        ZIndex = 0,
+        Visible = false,
+    }, ui.window)
+
+    local body = create("Frame", {
+        Name = "Body",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = C.bg,
+        BackgroundTransparency = 0.05,
+        ClipsDescendants = true,
+    }, ui.window)
+    addCorner(body, 14)
+    local bodyStroke = addStroke(body, Color3.new(1, 1, 1), 2, 0)
+    addRGBGradient(bodyStroke, 0)
+    ui.body = body
+
+    -- Luz em movimento e decorações (Custom UI) — atrás do conteúdo, começam ocultas
+    ui.light = create("Frame", {
+        Name = "MovingLight",
+        Size = UDim2.new(0, 75, 1.6, 0),
+        Position = UDim2.new(0, -120, -0.3, 0),
+        Rotation = 18,
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 0.7,
+        BorderSizePixel = 0,
+        ZIndex = 0,
+        Visible = false,
+    }, body)
+    create("UIGradient", {
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.5, 0.15),
+            NumberSequenceKeypoint.new(1, 1),
+        }),
+    }, ui.light)
+    ui.decor = create("Frame", {
+        Name = "Decor",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 0,
+    }, body)
+
+    -- ── Barra superior (arrastável) ───────────────────────────────
+    local topbar = create("Frame", {
+        Name = "Topbar",
+        Size = UDim2.new(1, 0, 0, 48),
+        BackgroundTransparency = 1,
+        Active = true,
+    }, body)
+
+    local logo = create("Frame", {
+        Position = UDim2.fromOffset(12, 9),
+        Size = UDim2.fromOffset(30, 30),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+    }, topbar)
+    addCircle(logo)
+    addRGBGradient(logo, 45)
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBlack,
+        Text = "⚡",
+        TextSize = 16,
+        TextColor3 = Color3.new(1, 1, 1),
+    }, logo)
+
+    local title = create("TextLabel", {
+        Position = UDim2.fromOffset(52, 6),
+        Size = UDim2.new(1, -110, 0, 22),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBlack,
+        Text = "FPS BOOSTER SUPREMO",
+        TextSize = 17,
+        TextColor3 = Color3.new(1, 1, 1),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, topbar)
+    addRGBGradient(title, 0)
+
+    create("TextLabel", {
+        Position = UDim2.fromOffset(52, 27),
+        Size = UDim2.new(1, -110, 0, 14),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = "Ultimate Roblox Performance System",
+        TextSize = 11,
+        TextColor3 = C.sub,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, topbar)
+
+    local minimizeButton = create("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -12, 0.5, 0),
+        Size = UDim2.fromOffset(30, 30),
+        BackgroundColor3 = C.row,
+        AutoButtonColor = false,
+        Font = Enum.Font.GothamBold,
+        Text = "—",
+        TextSize = 16,
+        TextColor3 = C.text,
+    }, topbar)
+    addCorner(minimizeButton, 8)
+    local minimizeStroke = addStroke(minimizeButton, C.stroke, 1, 0.2)
+    track(minimizeButton.MouseEnter:Connect(function()
+        tween(minimizeButton, 0.15, {BackgroundColor3 = C.rowHover})
+        tween(minimizeStroke, 0.15, {Color = C.cyan})
+    end))
+    track(minimizeButton.MouseLeave:Connect(function()
+        tween(minimizeButton, 0.15, {BackgroundColor3 = C.row})
+        tween(minimizeStroke, 0.15, {Color = C.stroke})
+    end))
+    track(minimizeButton.Activated:Connect(function() setMinimized(true) end))
+
+    create("Frame", {
+        Position = UDim2.fromOffset(0, 48),
+        Size = UDim2.new(1, 0, 0, 1),
+        BackgroundColor3 = C.stroke,
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0,
+    }, body)
+
+    makeDraggable(topbar, ui.window)
+
+    -- ── Sidebar ───────────────────────────────────────────────────
+    ui.sidebar = create("Frame", {
+        Position = UDim2.new(0, 0, 0, 49),
+        Size = UDim2.new(0, 168, 1, -49),
+        BackgroundColor3 = C.panel,
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+    }, body)
+
+    ui.tabIndicator = create("Frame", {
+        Position = UDim2.new(0, 0, 0, 17),
+        Size = UDim2.fromOffset(3, 26),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BorderSizePixel = 0,
+        ZIndex = 3,
+    }, ui.sidebar)
+    addCircle(ui.tabIndicator)
+    addRGBGradient(ui.tabIndicator, 90)
+
+    for index, def in ipairs(TAB_DEFS) do
+        local button = create("TextButton", {
+            Name = def.id,
+            Position = UDim2.new(0, 6, 0, 10 + (index - 1) * 46),
+            Size = UDim2.new(1, -12, 0, 40),
+            BackgroundColor3 = C.purple,
+            BackgroundTransparency = 1,
+            AutoButtonColor = false,
+            Text = "",
+        }, ui.sidebar)
+        addCorner(button, 10)
+        create("TextLabel", {
+            Size = UDim2.new(0, 34, 1, 0),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            Text = def.icon,
+            TextSize = 17,
+            TextColor3 = C.text,
+        }, button)
+        local label = create("TextLabel", {
+            Position = UDim2.fromOffset(36, 0),
+            Size = UDim2.new(1, -40, 1, 0),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            Text = def.name,
+            TextSize = 13,
+            TextColor3 = C.sub,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, button)
+        ui.tabs[def.id] = {button = button, label = label, index = index}
+
+        track(button.MouseEnter:Connect(function()
+            if ui.currentTab ~= def.id then tween(button, 0.15, {BackgroundTransparency = 0.9}) end
+        end))
+        track(button.MouseLeave:Connect(function()
+            if ui.currentTab ~= def.id then tween(button, 0.15, {BackgroundTransparency = 1}) end
+        end))
+        track(button.Activated:Connect(function() selectTab(def.id) end))
+    end
+
+    ui.footer = create("TextLabel", {
+        Position = UDim2.new(0, 8, 1, -34),
+        Size = UDim2.new(1, -16, 0, 28),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham,
+        Text = "Luna Community\n" .. VERSION,
+        TextSize = 10,
+        TextColor3 = C.sub,
+        TextWrapped = true,
+    }, ui.sidebar)
+
+    -- ── Conteúdo ──────────────────────────────────────────────────
+    ui.content = create("Frame", {
+        Position = UDim2.new(0, 168, 0, 49),
+        Size = UDim2.new(1, -168, 1, -49),
+        BackgroundTransparency = 1,
+        ClipsDescendants = true,
+    }, body)
+
+    for _, def in ipairs(TAB_DEFS) do
+        ui.pages[def.id] = createPage(ui.content, def.id)
+    end
+    buildBoosterPage(ui.pages.booster)
+    buildMonitorPage(ui.pages.monitor)
+    buildAdvancedPage(ui.pages.advanced)
+    buildLunaPage(ui.pages.luna)
+    buildOthersPage(ui.pages.others)
+    buildCustomPage(ui.pages.customui)
+    buildSettingsPage(ui.pages.settings)
+    buildCreditsPage(ui.pages.credits)
+
+    -- ── Toast (notificações) ──────────────────────────────────────
+    ui.toast = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 1),
+        Position = UDim2.new(0.5, 0, 1, 50),
+        Size = UDim2.fromOffset(260, 34),
+        BackgroundColor3 = C.bg,
+        BackgroundTransparency = 0.05,
+        Visible = false,
+        ZIndex = 20,
+    }, body)
+    addCorner(ui.toast, 17)
+    ui.toastStroke = addStroke(ui.toast, C.cyan, 1.5, 0)
+    ui.toastLabel = create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = "",
+        TextSize = 12,
+        TextColor3 = C.text,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        ZIndex = 21,
+    }, ui.toast)
+
+    -- ── HUD (FPS / Ping) ──────────────────────────────────────────
+    ui.hud = create("Frame", {
+        Name = "HUD",
+        AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(0.5, 0, 0, 8),
+        Size = UDim2.new(0, 0, 0, 28),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundColor3 = C.bg,
+        BackgroundTransparency = 0.2,
+        Visible = false,
+    }, ui.gui)
+    addCorner(ui.hud, 14)
+    addRGBGradient(addStroke(ui.hud, Color3.new(1, 1, 1), 1.5, 0), 120)
+    create("UIPadding", {PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14)}, ui.hud)
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0, 12),
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, ui.hud)
+    ui.hudFps = create("TextLabel", {
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = "FPS --",
+        TextSize = 13,
+        TextColor3 = C.green,
+        LayoutOrder = 1,
+    }, ui.hud)
+    ui.hudPing = create("TextLabel", {
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = "PING --",
+        TextSize = 13,
+        TextColor3 = C.cyan,
+        LayoutOrder = 2,
+    }, ui.hud)
+
+    -- ── Bolinha de reabrir (janela minimizada) — usa a imagem da Luna ──
+    ui.bubble = create("TextButton", {
+        Name = "Reopen",
+        AnchorPoint = Vector2.new(0, 0.5),
+        Position = UDim2.new(0, 14, 0.5, 0),
+        Size = UDim2.fromOffset(BUBBLE_SIZE, BUBBLE_SIZE),
+        BackgroundColor3 = C.bg,
+        BackgroundTransparency = 0.1,
+        AutoButtonColor = false,
+        Text = "",
+        Visible = false,
+    }, ui.gui)
+    addCircle(ui.bubble)
+    addRGBGradient(addStroke(ui.bubble, Color3.new(1, 1, 1), 2, 0), 200)
+    local bubbleImage = create("ImageLabel", {
+        Name = "Icon",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.new(1, -6, 1, -6),
+        BackgroundTransparency = 1,
+        Image = BUBBLE_ASSET,
+        ScaleType = Enum.ScaleType.Crop,
+    }, ui.bubble)
+    addCircle(bubbleImage)
+    track(ui.bubble.Activated:Connect(function() setMinimized(false) end))
+
+    -- ── Idioma: textos dinâmicos que não devem ser traduzidos por varredura ──
+    skipLocalize[ui.toastLabel] = true
+    skipLocalize[monUI.perf] = true
+    langHooks[#langHooks + 1] = function()
+        updateStatus()
+        updateMonitorUI()
+        updateHUD()
+        refreshPositionText()
+    end
+
+    -- ── Layout responsivo / limites de tela ───────────────────────
+    track(ui.window:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        applyLayoutMode()
+        local pos = clampToScreen(ui.window.AbsolutePosition)
+        ui.window.Position = UDim2.fromOffset(pos.X, pos.Y)
+    end))
+    applyLayoutMode()
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- TELA DE CONFIRMAÇÃO (idioma + SIM / NÃO) + CARREGAMENTO
+-- ════════════════════════════════════════════════════════════════
+local function shutdown()
+    if not alive then return end
+    if lunaDisableAll then pcall(lunaDisableAll) end
+    disableAllFeatures()
+    releaseBits(ALL_BITS_MASK)
+    dropWatchers()
+    alive = false
+    for _, connection in ipairs(connections) do
+        connection:Disconnect()
+    end
+    table.clear(connections)
+    if ui.gui then ui.gui:Destroy() end
+end
+
+local function launchMain()
+    ui.overlay = nil
+    positionWindow(config.position, false)
+    ui.window.Visible = true
+    local target = ui.window.Position
+    ui.window.Position = target + UDim2.fromOffset(0, 24)
+    tween(ui.window, 0.4, {Position = target}, Enum.EasingStyle.Quint)
+    hudReady = true
+    updateHUD()
+    selectTab("booster")
+    updateStatus()
+    notify("FPS Booster Supremo ready", C.green)
+end
+
+local function buildConfirmation()
+    local overlay = create("Frame", {
+        Name = "Overlay",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.45,
+        Active = true,
+        ZIndex = 10,
+    }, ui.gui)
+    ui.overlay = overlay
+
+    local modal = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(340, 246),
+        BackgroundColor3 = C.bg,
+        BackgroundTransparency = 0.03,
+    }, overlay)
+    addCorner(modal, 16)
+    addRGBGradient(addStroke(modal, Color3.new(1, 1, 1), 2, 0), 0)
+
+    local brand = create("TextLabel", {
+        Position = UDim2.fromOffset(0, 14),
+        Size = UDim2.new(1, 0, 0, 22),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBlack,
+        Text = "⚡ FPS BOOSTER SUPREMO",
+        TextSize = 17,
+        TextColor3 = Color3.new(1, 1, 1),
+    }, modal)
+    addRGBGradient(brand, 0)
+
+    -- Seleção de idioma
+    local languageLabel = create("TextLabel", {
+        Position = UDim2.fromOffset(20, 42),
+        Size = UDim2.new(1, -40, 0, 14),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = "LANGUAGE / IDIOMA",
+        TextSize = 10,
+        TextColor3 = C.sub,
+    }, modal)
+
+    local languageRow = create("Frame", {
+        Position = UDim2.fromOffset(20, 58),
+        Size = UDim2.new(1, -40, 0, 32),
+        BackgroundTransparency = 1,
+    }, modal)
+
+    local languageButtons = {}
+    local function refreshLanguageButtons()
+        for code, entry in pairs(languageButtons) do
+            local selected = code == lang
+            tween(entry.button, 0.2, {BackgroundColor3 = selected and C.row:Lerp(C.cyan, 0.25) or C.row})
+            tween(entry.stroke, 0.2, {Transparency = selected and 0 or 0.6})
+            entry.button.TextColor3 = selected and C.text or C.sub
+        end
+    end
+
+    local function languageButton(code, text, xScale)
+        local button = create("TextButton", {
+            Position = UDim2.new(xScale, xScale == 0 and 0 or 4, 0, 0),
+            Size = UDim2.new(0.5, -4, 1, 0),
+            BackgroundColor3 = C.row,
+            AutoButtonColor = false,
+            Font = Enum.Font.GothamBold,
+            Text = text,
+            TextSize = 12,
+            TextColor3 = C.sub,
+        }, languageRow)
+        addCorner(button, 10)
+        local stroke = addStroke(button, C.cyan, 1.5, 0.6)
+        languageButtons[code] = {button = button, stroke = stroke}
+        track(button.Activated:Connect(function()
+            if lang == code then return end
+            lang = code
+            applyLanguage()
+            refreshLanguageButtons()
+        end))
+    end
+    languageButton("pt", "PORTUGUÊS (BR)", 0)
+    languageButton("en", "ENGLISH (US)", 0.5)
+    refreshLanguageButtons()
+
+    local message = create("TextLabel", {
+        Position = UDim2.fromOffset(20, 98),
+        Size = UDim2.new(1, -40, 0, 56),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = "Do you want to run FPS Booster Supremo?",
+        TextSize = 16,
+        TextColor3 = C.text,
+        TextWrapped = true,
+    }, modal)
+
+    -- Botões SIM / NÃO
+    local buttons = create("Frame", {
+        Position = UDim2.fromOffset(20, 170),
+        Size = UDim2.new(1, -40, 0, 46),
+        BackgroundTransparency = 1,
+    }, modal)
+
+    local function choiceButton(text, color, xScale, callback)
+        local button = create("TextButton", {
+            Position = UDim2.new(xScale, xScale == 0 and 0 or 5, 0, 0),
+            Size = UDim2.new(0.5, -5, 1, 0),
+            BackgroundColor3 = C.row,
+            AutoButtonColor = false,
+            Font = Enum.Font.GothamBlack,
+            Text = text,
+            TextSize = 15,
+            TextColor3 = color,
+        }, buttons)
+        addCorner(button, 12)
+        local stroke = addStroke(button, color, 2, 0.2)
+        local hoverBg = C.row:Lerp(color, 0.2)
+        track(button.MouseEnter:Connect(function()
+            tween(button, 0.15, {BackgroundColor3 = hoverBg})
+            tween(stroke, 0.15, {Transparency = 0})
+        end))
+        track(button.MouseLeave:Connect(function()
+            tween(button, 0.15, {BackgroundColor3 = C.row})
+            tween(stroke, 0.15, {Transparency = 0.2})
+        end))
+        track(button.Activated:Connect(callback))
+    end
+
+    -- Área de carregamento
+    local countdown = create("TextLabel", {
+        Position = UDim2.fromOffset(0, 130),
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBlack,
+        Text = "",
+        TextSize = 24,
+        TextColor3 = C.cyan,
+        Visible = false,
+    }, modal)
+    local track2 = create("Frame", {
+        Position = UDim2.fromOffset(24, 176),
+        Size = UDim2.new(1, -48, 0, 10),
+        BackgroundColor3 = C.row,
+        Visible = false,
+    }, modal)
+    addCircle(track2)
+    local fill = create("Frame", {
+        Size = UDim2.fromScale(0, 1),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BorderSizePixel = 0,
+    }, track2)
+    addCircle(fill)
+    addRGBGradient(fill, 0)
+
+    local function startCountdown(text, seconds, onDone)
+        languageLabel.Visible = false
+        languageRow.Visible = false
+        message.Position = UDim2.fromOffset(20, 62)
+        message.Text = tr(text)
+        buttons.Visible = false
+        countdown.Visible = true
+        track2.Visible = true
+        fill.Size = UDim2.fromScale(0, 1)
+        tween(fill, seconds, {Size = UDim2.fromScale(1, 1)}, Enum.EasingStyle.Linear)
+        task.spawn(function()
+            for remaining = seconds, 1, -1 do
+                if not alive then return end
+                countdown.Text = tostring(remaining)
+                task.wait(1)
+            end
+            if not alive then return end
+            onDone()
+        end)
+    end
+
+    choiceButton("YES", C.green, 0, function()
+        startCountdown("Perfect! Your FPS Booster will start in 5 seconds.", 5, function()
+            local fade = tween(overlay, 0.3, {BackgroundTransparency = 1})
+            modal.Visible = false
+            fade.Completed:Connect(function() overlay:Destroy() end)
+            launchMain()
+        end)
+    end)
+    choiceButton("NO", C.red, 0.5, function()
+        startCountdown("Ok! Closing GUI in 3 seconds.", 3, function()
+            shutdown()
+        end)
+    end)
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- INICIALIZAÇÃO
+-- ════════════════════════════════════════════════════════════════
+buildInterface()
+buildConfirmation()
+applyLanguage()
+
+local rgbAccumulator = 0
+track(RunService.Heartbeat:Connect(function(dt)
+    -- Monitor: apenas contadores por frame; processamento a cada 0.5s
+    monitor.frames += 1
+    monitor.elapsed += dt
+    if dt > monitor.worstDt then monitor.worstDt = dt end
+    if monitor.elapsed >= SAMPLE_INTERVAL then
+        pushSample()
+    end
+
+    -- Animação RGB (30 Hz, somente quando há interface visível)
+    if config.rgb then
+        rgbAccumulator += dt
+        if rgbAccumulator >= 0.033 then
+            local step = rgbAccumulator
+            rgbAccumulator = 0
+            if ui.window.Visible or ui.bubble.Visible or ui.overlay then
+                updateRGB()
+                if customTick then customTick(step) end
+            end
+        end
+    end
+
+    -- Memory Optimization: limpeza periódica de caches internos
+    if state.memory then
+        memoryTimer += dt
+        if memoryTimer >= 30 then
+            memoryTimer = 0
+            flushCaches()
+        end
+    end
+end))
